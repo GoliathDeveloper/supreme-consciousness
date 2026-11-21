@@ -2,10 +2,11 @@
 //
 // Presentation and interaction layer only: it renders the inbox/outbox/wait
 // tokens published by the opencode-herdr plugin (via the `herdr` shim's
-// metadata files), the plugin's agent inventory, and a human-review history
-// of what each agent asked another to do (read-only projection of the
-// coordination store). Clicks only focus panes. It never changes
-// coordination state — the plugin's SQLite store stays the source of truth.
+// metadata files), the plugin's agent inventory, live coordination activity
+// (pending work and the transition feed), and a human-review history of what
+// each agent asked another to do (read-only projection of the coordination
+// store). Clicks only focus panes. It never changes coordination state — the
+// plugin's SQLite store stays the source of truth.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -31,15 +32,18 @@ const STATE_COLOR = {
   queued: "accent",
   cancelled: "idle",
 };
+const PENDING = new Set(["queued", "unknown", "submitted", "accepted"]);
 
 const clip = (text, n) => {
   const s = String(text ?? "");
   return s.length > n ? `${s.slice(0, Math.max(0, n - 1))}…` : s;
 };
 const short = (label) => String(label ?? "").replace(/^OC \| /, "");
-const clock = (ms) => {
+const clock = (ms, seconds) => {
   const d = new Date(Number(ms));
-  return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (isNaN(d)) return "";
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return seconds ? `${hm}:${String(d.getSeconds()).padStart(2, "0")}` : hm;
 };
 
 export default class CoordinationPanel extends View {
@@ -47,6 +51,7 @@ export default class CoordinationPanel extends View {
     this.tokens = {};
     this.agents = [];
     this.history = [];
+    this.feed = [];
     this.processed = 0;
     this.counts = {};
     this.error = null;
@@ -95,18 +100,34 @@ export default class CoordinationPanel extends View {
       const parsed = JSON.parse(review.stdout || "{}")?.result;
       if (review.code === 0 && parsed) {
         this.history = parsed.requests ?? [];
+        this.feed = parsed.feed ?? [];
         this.processed = parsed.processed ?? 0;
         this.counts = parsed.counts ?? {};
       } else {
         this.history = [];
+        this.feed = [];
         this.processed = 0;
         this.counts = {};
       }
     } catch {
       this.history = [];
+      this.feed = [];
       this.processed = 0;
       this.counts = {};
     }
+  }
+
+  // Pending coordination obligations per session: a queued/unknown/submitted
+  // request means the prompt is on its way or the agent is acting; an accepted
+  // task means it owes a handback. This is sticky where a session-execution
+  // snapshot flickers, so people can see work the snapshots miss.
+  pendingWork() {
+    const pending = {};
+    for (const entry of this.history ?? []) {
+      if (!PENDING.has(entry.state)) continue;
+      pending[entry.recipientSession] = { state: entry.state, brief: entry.brief, origin: entry.origin, id: entry.id };
+    }
+    return pending;
   }
 
   token(paneId, name) {
@@ -114,9 +135,9 @@ export default class CoordinationPanel extends View {
     return value ?? "idle 0";
   }
 
-  chip(label, value, colorName) {
+  chip(label, value) {
     const t = theme();
-    const color = t[colorName ?? COLOR[String(value ?? "").split(" ")[0]] ?? "idle"];
+    const color = t[COLOR[String(value ?? "").split(" ")[0]] ?? "idle"];
     const rest = String(value ?? "").split(" ").slice(1).join(" ");
     return h_flex().gap(4).items_center().flex_none()
       .child(div().size(6).rounded(3).flex_none().bg(color))
@@ -125,55 +146,68 @@ export default class CoordinationPanel extends View {
   }
 
   tokenRow(label, value) {
-    const text = String(value ?? "idle 0");
-    return this.chip(label, text);
+    return this.chip(label, value);
   }
 
-  agentRow(agent) {
+  agentRow(agent, pending) {
     const t = theme();
     const pane = agent.pane_id;
-    const status = agent.agent_status === "working" ? t.working : t.idle;
+    const busy = agent.agent_status === "working";
+    const work = pending[agent.sessionId ?? agent.agent_session?.value];
+    const active = busy || Boolean(work);
+    const workLine = work
+      ? div().text_color(t.working).child(clip(`↳ ${work.state === "accepted" ? "owed handback" : work.state}: ${work.brief}`, 120))
+      : null;
     return v_flex().id(`agent-${pane}`).gap(4).p(8).rounded(6).bg(t.canvas)
       .on_click(() => run("agent.focus", { terminal: agent.terminal_id }))
       .child(h_flex().gap(6).items_center()
-        .child(div().size(7).rounded(4).flex_none().bg(status))
+        .child(div().size(7).rounded(4).flex_none().bg(active ? t.working : t.idle))
         .child(div().flex_1().text_color(t.foreground).child(short(agent.name || agent.cwd || pane)))
-        .child(div().text_color(t.dim).child(agent.agent_status ?? "unknown")))
+        .child(div().text_color(active ? t.working : t.dim).child(work && !busy ? "coordination" : agent.agent_status ?? "unknown")))
+      .when(Boolean(workLine), el => el.child(workLine))
       .child(h_flex().gap(12)
         .child(this.tokenRow("in", this.token(pane, "herdr_inbox")))
         .child(this.tokenRow("out", this.token(pane, "herdr_outbox")))
         .child(this.tokenRow("wait", this.token(pane, "herdr_wait"))));
   }
 
-  historyRow(entry) {
+  historyRow(entry, liveBySession) {
     const t = theme();
-    const colorName = STATE_COLOR[entry.state] ?? "idle";
-    const color = t[colorName] ?? t.idle;
-    const agent = (this.agents ?? []).find(a => a.agent_session?.value && entry.origin && a.agent_session.value === undefined);
-    // focus the origin pane when its session is live in the inventory
-    const originAgent = (this.agents ?? []).find(a => a.agent_session?.value === (this.originSession?.[entry.id] ?? null));
-    const counts = this.counts ?? {};
+    const color = t[STATE_COLOR[entry.state] ?? "idle"] ?? t.idle;
+    const originAgent = liveBySession.get(entry.originSession);
     return v_flex().id(`hist-${entry.id?.slice(0, 8)}`).gap(3).p(8).rounded(6).bg(t.canvas)
-      .when(Boolean(originAgent), el => el.on_click(() => run("agent.focus", { terminal: originAgent.terminal_id })))
+      .on_click(() => { if (originAgent) run("agent.focus", { terminal: originAgent.terminal_id }); })
       .child(h_flex().gap(5).items_center()
         .child(div().size(6).rounded(3).flex_none().bg(color))
         .child(div().text_color(t.dim).flex_none().child(clock(entry.updatedAt)))
         .child(h_flex().gap(3).items_center().flex_1()
-          .child(div().text_color(t.foreground).child(clip(short(entry.origin), 22)))
+          .child(div().text_color(t.foreground).child(clip(short(entry.origin), 20)))
           .child(div().text_color(t.dim).child("→"))
-          .child(div().text_color(t.foreground).child(clip(short(entry.recipient), 22))))
+          .child(div().text_color(t.foreground).child(clip(short(entry.recipient), 20))))
         .child(div().text_color(color).flex_none().child(entry.state)))
-      .child(div().text_color(t.muted).child(clip(entry.brief, 150)))
-      .when(Boolean(entry.summary), el => el.child(div().text_color(color).child(clip(`→ ${entry.summary}`, 160))))
+      .child(div().text_color(t.muted).child(clip(entry.brief, 170)))
+      .when(Boolean(entry.summary), el => el.child(div().text_color(color).child(clip(`→ ${entry.summary}`, 170))))
       .child(div().text_color(t.dim).text_size(10.5).child((entry.transitions ?? []).join(" → ")));
+    return row;
+  }
+
+  // One broken section must not take the whole panel down: the caught error
+  // renders inline so the failure is visible instead of a frozen frame.
+  safe(label, build) {
+    try { return build(); } catch (error) {
+      const stack = String(error?.stack ?? error).replace(/\n+/g, " | ").slice(0, 260);
+      return div().text_color(theme().blocked).child(`${label}: ${stack}`);
+    }
   }
 
   render() {
     const t = theme();
     const list = this.agents ?? [];
     const history = this.history ?? [];
-    const counts = this.counts ?? {};
-    const countText = Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(" · ") || "nothing yet";
+    const feed = this.feed ?? [];
+    const pending = this.pendingWork();
+    const liveBySession = new Map(list.map(a => [a.agent_session?.value, a]).filter(([session]) => Boolean(session)));
+    const countText = Object.entries(this.counts ?? {}).map(([k, v]) => `${k} ${v}`).join(" · ") || "nothing yet";
     const header = h_flex().gap(6).items_center()
       .child(div().font_weight(600).text_color(t.foreground).child("Coordination"))
       .child(div().flex_1())
@@ -183,13 +217,23 @@ export default class CoordinationPanel extends View {
       .child(header)
       .when(Boolean(this.error), (el) => el.child(div().text_color(t.blocked).child(this.error)))
       .when(list.length === 0 && !this.error, (el) => el.child(div().text_color(t.dim).child("No OpenCode agents reported by the herdr shim")))
-      .when(list.length > 0, (el) => el.children(list.map(a => this.agentRow(a))))
+      .when(list.length > 0, (el) => el.children(list.map(a => this.safe(`agentRow ${a.pane_id?.slice(0, 8)}`, () => this.agentRow(a, pending)))))
+      .child(h_flex().gap(6).items_center().pt(4)
+        .child(div().font_weight(600).text_color(t.foreground).child("Now"))
+        .child(div().flex_1())
+        .child(div().text_color(t.dim).child("live transitions")))
+      .when(feed.length === 0, (el) => el.child(div().text_color(t.dim).child("Nothing yet — transitions appear as agents coordinate")))
+      .when(feed.length > 0, (el) => el.children(feed.slice(0, 6).map(step => this.safe(`feed ${step.transition}`, () => h_flex().gap(5).items_center()
+        .child(div().text_color(t.dim).flex_none().child(clock(step.at, true)))
+        .child(div().text_color(t.muted).flex_1().child(clip(short(step.actor), 26)))
+        .child(div().text_color(t.foreground).child(step.transition))
+        .child(div().text_color(t.dim).flex_none().child(step.request?.slice(0, 8) ?? ""))))))
       .child(h_flex().gap(6).items_center().pt(4)
         .child(div().font_weight(600).text_color(t.foreground).child("History"))
         .child(div().flex_1())
         .child(div().text_color(t.dim).child(`${countText} · ${history.length} shown`)))
       .when(history.length === 0, (el) => el.child(div().text_color(t.dim).child("No requests recorded yet")))
-      .when(history.length > 0, (el) => el.children(history.map(e => this.historyRow(e))))
-      .child(h_flex().gap(4).items_center().child(div().text_color(t.dim).child("Click an agent or a history entry to focus its pane")));
+      .when(history.length > 0, (el) => el.children(history.map(e => this.safe(`history ${e.id?.slice(0, 8)}`, () => this.historyRow(e, liveBySession)))))
+      .child(h_flex().gap(4).items_center().child(div().text_color(t.dim).child("Click an agent, a transition or a history entry to focus its pane")));
   }
 }

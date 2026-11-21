@@ -276,16 +276,12 @@ async function review(limit = 20) {
   }
   const ids = requests.map(r => `'${String(r.id).replace(/'/g, '')}'`).join(',');
   let agents = [];
-  let counts = {};
   const transitions = {};
   if (ids) {
     try { agents = await sqliteJson('SELECT id, label, sessionId FROM agents'); } catch {}
-    try { counts = (await sqliteJson(`SELECT outcome, COUNT(*) AS n FROM results GROUP BY outcome`))[0] ?? {}; } catch {}
-    counts = {};
-    try { for (const row of await sqliteJson('SELECT outcome, COUNT(*) AS n FROM results GROUP BY outcome')) counts[row.outcome] = row.n; } catch {}
     try {
-      for (const row of await sqliteJson(`SELECT entityId, transition FROM audit_events WHERE entityId IN (${ids}) ORDER BY id`)) {
-        (transitions[row.entityId] ??= []).push(row.transition);
+      for (const row of await sqliteJson(`SELECT entityId, transition, sessionId, createdAt FROM audit_events WHERE entityId IN (${ids}) ORDER BY id`)) {
+        (transitions[row.entityId] ??= []).push({ at: row.createdAt, transition: row.transition, session: row.sessionId, actor: null });
       }
     } catch {}
   }
@@ -294,15 +290,30 @@ async function review(limit = 20) {
     const agent = agents.find(a => a.id === agentId || a.sessionId === agentId);
     return agent?.label ?? String(agentId).slice(0, 12);
   };
+  const feed = [];
+  for (const entry of requests) {
+    for (const step of transitions[entry.id] ?? []) {
+      step.actor = labelOf(step.session);
+      feed.push({ at: step.at, request: entry.id, state: entry.state, transition: step.transition, actor: step.actor });
+    }
+    entry.originSession = entry.origin;
+    entry.recipientSession = entry.recipient;
+    entry.origin = labelOf(entry.origin);
+    entry.recipient = labelOf(entry.recipient);
+  }
+  feed.sort((a, b) => b.at - a.at);
+  const counts = {};
+  for (const r of requests) if (r.outcome) counts[r.outcome] = (counts[r.outcome] ?? 0) + 1;
   const processed = Object.values(counts).reduce((sum, n) => sum + n, 0);
   return { result: {
     requests: requests.map(r => ({
       id: r.id, kind: r.kind, state: r.state, generation: r.generation,
-      origin: labelOf(r.origin), recipient: labelOf(r.recipient),
+      origin: r.origin, recipient: r.recipient, originSession: r.originSession, recipientSession: r.recipientSession,
       brief: r.brief, outcome: r.outcome ?? null, summary: r.summary ?? null,
       validation: r.validation ?? null, createdAt: r.createdAt, updatedAt: r.updatedAt,
-      transitions: transitions[r.id] ?? [],
+      transitions: (transitions[r.id] ?? []).map(step => step.transition),
     })),
+    feed: feed.slice(0, 12),
     processed,
     counts,
   } };
