@@ -77,6 +77,53 @@ node scripts/send-request.mjs --to "arcadedb" --from "Herdr-A2A" --kind task \
 See `docs/live-bridge-demo.md` for a recorded run of exactly this pattern with
 the audit trail.
 
+## Multi-turn chain tests (4 and 6 hops)
+
+Two ready-made relay chains test **multiple turns of sending and receiving**.
+One command seeds leg 1; each hop's brief carries the next leg verbatim, so the
+chain propagates through the agents themselves, and every hop hands the received
+summary back up — the handback cascade ends at the starter.
+
+```sh
+# 4 sends: you → arcadedb → ICM → myenergi → you (acknowledgement leg)
+node scripts/chain-test.mjs --hops 4
+
+# 6 sends: you → arcadedb → ICM → myenergi → you → arcadedb → ICM (final ack)
+node scripts/chain-test.mjs --hops 6
+
+# Inspect the generated briefs without queueing anything
+node scripts/chain-test.mjs --hops 6 --dry
+```
+
+What you should see:
+
+1. The **Now** feed grows hop by hop: `enqueue:1` for each leg as each agent
+   sends onward, interleaved with `accept`/`finish:1:completed` as handbacks
+   cascade back down the chain.
+2. **Processed** increments once per completed leg (4 for a clean 4-chain).
+3. The final handback notice to your pane summarises the whole relay:
+   `hop 1 (arcadedb): ICM replied: hop 2 … myenergi replied: chain hop 4 acknowledged…`
+4. `node scripts/watch-store.mjs` shows every leg with its own idempotency key
+   (`chain4-leg1` … `chain4-leg4`), so retries are safe: replaying the chain
+   reuses the same keys and deduplicates.
+
+Routes are **linear by design**: no agent ever receives a second leg while it
+still holds an open task, so no hop can deadlock the store's one-pending-per-
+agent queue. Intermediate holds queue and dispatch in order.
+
+**Model requirements.** Each intermediate agent must copy the next leg's text
+verbatim — nested briefs grow with hop count (~600 characters for a 4-hop,
+~900 for a 6-hop). Capable models handle this; a 1.7B-class local model may
+mangle the relay text, and the chain stalls at that hop — the Now feed shows
+exactly where it stopped. Idempotency keys are fixed, so you can re-run the
+same chain command after fixing a stalled hop without creating duplicates:
+
+```sh
+# inspect where the chain stalled, then clear in-flight legs if needed
+node scripts/watch-store.mjs
+node scripts/cancel-request.mjs --id <legId> --from "<that pane>"
+```
+
 ## What the states mean
 
 | Delivery state | Meaning |
