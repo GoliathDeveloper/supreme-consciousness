@@ -142,13 +142,17 @@ export default Plugin.define({
     const caller = async (sessionID: string | undefined) => {
       if (!configured) throw new Error("Coordination is disabled until configuration passes its Envoy conflict check");
       if (!sessionID || sessionID.startsWith("remote:")) throw new Error("A local host-authenticated conversation is required");
+      // Every plugin instance registers the same tool names, so a call may run
+      // through any instance; bind on the calling session's own directory (the
+      // session record), not on the instance location.
+      const sessionDirectory = await ctx.session.get({ sessionID }).then(s => s.location?.directory ?? null).catch(() => null);
       const live = await inventory(store);
       // The TUI generation bound a tool call to HERDR_PANE_ID from a per-pane
       // server environment. The desktop generation shares one server across
       // panes, so the service environment cannot carry the calling pane; the
       // shim's session↔pane binding from Herdr's live layout is the pane
       // authority here. The conversation must be reported exactly once.
-      const matches = live.filter(a => a.sessionId === sessionID && a.directory === directory);
+      const matches = live.filter(a => a.sessionId === sessionID && (sessionDirectory === null || a.directory === sessionDirectory));
       if (matches.length > 1) throw new Error("Conversation is reported in more than one Herdr pane; close the duplicate and refresh");
       if (matches.length === 0) throw new Error("Current conversation is not reported by Herdr. Install Herdr's OpenCode session integration and refresh.");
       origins.add(sessionID);

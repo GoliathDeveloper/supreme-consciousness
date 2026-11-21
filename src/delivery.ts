@@ -18,10 +18,16 @@ export const requestPrompt = (r: Request) => `[opencode-herdr request ${r.id} ge
     "This is a task alongside your existing work. Call hand_back with the same requestId and generation when finished. " +
     "Do not commit, discard, merge or clean up resources unless separately authorised.");
 
-export async function inventory(store: Store, env = process.env,
+export async function inventory(store: Store, env: NodeJS.ProcessEnv = process.env,
   runner: (file: string, args: string[], options: { timeout: number; maxBuffer: number; env: NodeJS.ProcessEnv }) => Promise<{ stdout: string; stderr: string }> = run): Promise<Agent[]> {
-  if (env.HERDR_ENV !== "1" || !env.HERDR_SOCKET_PATH) return [];
-  const response = await runner("herdr", ["agent", "list"], { timeout: 5000, maxBuffer: 4 * 1024 * 1024, env });
+  // The TUI generation set HERDR_ENV/HERDR_SOCKET_PATH in every pane. The
+  // desktop generation's shared server daemons inherit neither; there the
+  // shim itself is the Herdr signal and the socket identity falls back to a
+  // stable symbolic value so pinned bindings survive restarts.
+  if (env.HERDR_ENV !== undefined && env.HERDR_ENV !== "1") return [];
+  const socket = env.HERDR_SOCKET_PATH || "herdr-core:local";
+  const response = await runner("herdr", ["agent", "list"], { timeout: 5000, maxBuffer: 4 * 1024 * 1024, env }).catch(() => null);
+  if (!response) return [];
   const panes = JSON.parse(response.stdout).result?.agents;
   if (!Array.isArray(panes)) throw new Error("Invalid Herdr inventory");
   const agents: Agent[] = [];
@@ -29,7 +35,7 @@ export async function inventory(store: Store, env = process.env,
   for (const pane of panes) {
     if (pane.agent !== "opencode" || pane.agent_session?.agent !== "opencode" || pane.agent_session.kind !== "id") continue;
     if (![pane.pane_id, pane.terminal_id, pane.workspace_id, pane.cwd, pane.agent_session.value].every((s) => typeof s === "string" && s)) continue;
-    try { agents.push(store.observeAgent({ sessionId: pane.agent_session.value, socket: env.HERDR_SOCKET_PATH,
+    try { agents.push(store.observeAgent({ sessionId: pane.agent_session.value, socket,
       paneId: pane.pane_id, terminalId: pane.terminal_id, workspaceId: pane.workspace_id, directory: pane.cwd,
       label: pane.name || pane.terminal_title || pane.agent_session.value, state: pane.agent_status || "unknown", lastSeen: Date.now() })); }
     catch (error) {
@@ -126,12 +132,13 @@ export class DeliveryWorker {
     return { agent: persona, model, variant };
   }
   private async live(expected: Agent): Promise<Agent | undefined> {
-    if (this.stopped || process.env.HERDR_ENV !== "1" || !process.env.HERDR_SOCKET_PATH) return;
+    if (this.stopped || (process.env.HERDR_ENV !== undefined && process.env.HERDR_ENV !== "1")) return;
+    const socket = process.env.HERDR_SOCKET_PATH || "herdr-core:local";
     const agents = await this.discover();
-    const agent = agents.find(a => a.socket === process.env.HERDR_SOCKET_PATH && a.directory === this.directory &&
+    const agent = agents.find(a => a.socket === socket && a.directory === this.directory &&
       IDENTITY_KEYS.every(key => a[key as keyof Agent] === expected[key as keyof Agent]));
     if (!agent || agent.machineId !== this.store.machineId ||
-        agents.filter(a => a.socket === process.env.HERDR_SOCKET_PATH && (a.sessionId === agent.sessionId || a.terminalId === agent.terminalId)).length !== 1) return;
+        agents.filter(a => a.socket === socket && (a.sessionId === agent.sessionId || a.terminalId === agent.terminalId)).length !== 1) return;
     return agent;
   }
   private report() {
@@ -148,17 +155,18 @@ export class DeliveryWorker {
     return this.active;
   }
   private async scan() {
-    if (process.env.HERDR_ENV !== "1" || !process.env.HERDR_SOCKET_PATH) return;
+    if (process.env.HERDR_ENV !== undefined && process.env.HERDR_ENV !== "1") return;
+    const socket = process.env.HERDR_SOCKET_PATH || "herdr-core:local";
     const agents = await this.discover();
     if (this.stopped) return;
     // The original build served the single agent bound to this server's pane.
     // The desktop generation shares one server across panes, so the worker
     // serves every Herdr-reported agent in its own directory. One live record
     // per session or terminal still guards against duplicate bindings.
-    const local = agents.filter(a => a.socket === process.env.HERDR_SOCKET_PATH && a.directory === this.directory);
+    const local = agents.filter(a => a.socket === socket && a.directory === this.directory);
     for (const agent of local) {
       if (this.stopped) return;
-      if (agents.filter(a => a.socket === process.env.HERDR_SOCKET_PATH && (a.sessionId === agent.sessionId || a.terminalId === agent.terminalId)).length !== 1) continue;
+      if (agents.filter(a => a.socket === socket && (a.sessionId === agent.sessionId || a.terminalId === agent.terminalId)).length !== 1) continue;
       await this.serve(agent);
     }
   }
