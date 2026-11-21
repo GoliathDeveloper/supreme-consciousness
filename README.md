@@ -21,6 +21,94 @@ to Herdr's sidebar — with a persistent SQLite store as the single source of tr
 
 The GUI is a presentation layer, **not** the source of truth for collaboration.
 
+## How the agents actually talk
+
+OpenCode sessions **never open a channel to each other**. Every message between two
+agents goes through the coordination store, and two background workers relay it:
+
+- the **sender's** worker enqueues and delivers prompts into the recipient's pane
+- the **recipient's** worker accepts, publishes results, and relays the outcome back
+
+Each OpenCode instance runs one plugin instance with its own `DeliveryWorker`
+(`src/delivery.ts`) ticking every 2 seconds against the same SQLite store.
+
+```mermaid
+sequenceDiagram
+    participant S as Sender (OpenCode pane A)
+    participant WA as Worker in A's server
+    participant DB as Coordination store (SQLite)
+    participant WB as Worker in B's server
+    participant R as Recipient (OpenCode pane B)
+
+    S->>DB: request_agent → request (generation 1) + delivery: queued
+    loop every 2 s
+        WB->>DB: pending request for me?
+        WB->>WB: is my agent idle? (herdr shim → pane + running-session map)
+    end
+    WB->>DB: attempt → delivery: unknown (messageId minted)
+    WB->>R: user prompt: "Call read_task requestId=… generation=1 deliveryId=…"
+    WB->>R: read the message back → exact text + id verified → delivery: submitted
+    R->>DB: read_task (re-verifies the receipt) → delivery: accepted
+    Note over R: does the work — advisory: report only · code_change: scoped edits
+    R->>DB: hand_back → immutable result row (completed | paused | failed)
+    DB-->>WA: notice scheduled for the sender
+    WA->>S: user prompt: "Request … generation 1: completed … <summary>"
+    S->>DB: inspect_request → reads the immutable receipt
+```
+
+**What "deliver a prompt" means.** The worker looks up the recipient pane's current
+agent and model (Herdr inventory + OpenCode's session record), switches the
+recipient session to them, and calls `ctx.session.prompt` with a deterministic
+`messageID` and the prompt text `requestPrompt(request)`. The prompt tells the
+recipient model exactly which tool to call: *"Call read_task with requestId=…,
+generation=…, deliveryId=…"*. The recipient never receives anything outside its own
+normal conversation — a task arrives as a user message, and its model acts on it.
+
+**Receipts make delivery crash-safe.** A prompt is only considered delivered after
+the worker reads that exact message back from the recipient's session (same
+`messageID`, role `user`, same text). States of a delivery:
+
+| delivery state | meaning |
+| --- | --- |
+| `queued` | waiting; recipient must be idle before dispatch |
+| `unknown` | prompt attempted, receipt not yet proven (worker crashed mid-flight, or still verifying) |
+| `submitted` | receipt verified in the recipient's session |
+| `accepted` | the recipient called `read_task` |
+| `cancelled` | sender cancelled before submission |
+
+`unknown` is deliberately never silently re-sent (a resend could double-deliver):
+the worker keeps re-verifying the receipt each tick, and the sender can
+`cancel_request` to clear it. **One request is pending per agent at a time** — the
+inbox is strictly ordered, and a stuck `unknown` blocks later work until resolved.
+
+**Results and questions are notices, not pushes.** `hand_back` writes an immutable
+result row and schedules a *notice* for the sender; the sender's worker delivers it
+as a prompt ("Request … generation 1: completed …") when the sender is idle.
+Mid-task questions work the same way in both directions:
+`ask_coordinator` → notice to the sender → `reply_question` → notice back to the
+recipient, with supersession when a task generation ends. Everything is auditable
+after the fact via `inspect_request` (every transition is in `audit_events`).
+
+**Tasks vs instructions.** A *task* must `hand_back` an outcome and occupies the
+queue slot until the result lands (`accepted` still counts as pending — that is the
+`wait` token). An *instruction* is acknowledged by acceptance and releases its slot
+immediately — it cannot hand back.
+
+**Pause, resume, generations.** `hand_back` with `paused` keeps the request alive.
+`resume_request` appends an immutable generation 2 brief and queues a fresh
+delivery; generation 1's brief and results can never be rewritten (enforced by
+triggers). `may_continue` flags whether already-submitted work may keep going
+after a cancel.
+
+**Remote agents.** `request_agent` with a `peerId` performs the same flow against a
+peer machine's store over SSH (`src/remote.ts`): the peer's store owns delivery
+there, and results/questions stream back as notices into local operations —
+identity, revisions and history snapshots are validated before caching.
+
+**What the sidebar shows.** The `$herdr_inbox` / `$herdr_outbox` / `$herdr_wait`
+tokens are projections of exactly these rows (highest-priority state + retained
+count), published by the workers through the shim for the mod to render.
+
 ## Components
 
 ### 1. The plugin (this repository)
@@ -158,7 +246,7 @@ npm run test                 # node --test test/*.test.mjs (shortcut/TUI contrac
 npm run test:coordination    # bun --conditions=browser: store, delivery, provision,
                              # remote, mailbox, workflows — the full behavioural spec
 npm run test:sqlite-host     # bun:sqlite inside real OpenCode plugin processes
-node test/smoke              # see below: Node driver smoke test
+node test/node-driver-smoke.mjs  # the same Store code under plain Node (node:sqlite adapter)
 ```
 
 The coordination suite is the specification: idempotency conflicts, delivery state
