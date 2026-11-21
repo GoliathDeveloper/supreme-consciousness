@@ -235,6 +235,14 @@ Run OpenCode in two Herdr panes, then:
    `resume_request` for paused tasks; `list_operations` to reconcile uncertain
    provisioning effects
 
+**Testing it yourself** — you do not need a model to cooperate to trigger a test:
+`scripts/send-request.mjs` queues one from a terminal, `scripts/watch-store.mjs`
+shows every state change live, and `scripts/cancel-request.mjs` unblocks a stuck
+queue. The full walkthrough, including the stuck-`submitted` failure mode and its
+remedies, is in **[docs/testing-agents.md](docs/testing-agents.md)**. A recorded
+two-agent chain with the audit trail is in
+**[docs/live-bridge-demo.md](docs/live-bridge-demo.md)**.
+
 Agents that are reserved for closure refuse new work; a close operation keeps its
 reservation even when the caller reports failure, until reconciliation confirms it.
 
