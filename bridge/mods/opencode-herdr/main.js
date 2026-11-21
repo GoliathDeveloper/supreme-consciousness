@@ -10,7 +10,7 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, exec, readTextFile, run, home } from "herdr";
+import { theme, exec, readTextFile, run, home, setBadge, checking } from "herdr";
 
 const METADATA = () => `${home()}/.local/state/opencode-herdr/metadata`;
 
@@ -114,6 +114,12 @@ export default class CoordinationPanel extends View {
       this.feed = [];
       this.processed = 0;
       this.counts = {};
+    }
+    // Window badge: pending coordination work is visible even when this panel
+    // is not on screen. Clear when nothing is owed.
+    if (!checking()) {
+      const pendingCount = Object.keys(this.pendingWork()).length;
+      setBadge(pendingCount > 0 ? `⇄ ${pendingCount}` : null);
     }
   }
 
