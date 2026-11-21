@@ -4,6 +4,9 @@ import { randomBytes } from "node:crypto";
 import { createSidebarPublisher } from "./sidebar.js";
 import { remoteOutbox } from "./remote.js";
 const run = promisify(execFile);
+// The identity the store pins at observation time; a live inventory entry must
+// match it exactly before the worker serves or dispatches to that agent.
+const IDENTITY_KEYS = ["id", "machineId", "sessionId", "socket", "paneId", "terminalId", "workspaceId", "directory"];
 export const messageId = () => `msg_${(BigInt(Date.now()) * 0x1000n & 0xffffffffffffn).toString(16).padStart(12, "0")}${randomBytes(7).toString("hex")}`;
 export const requestPrompt = (r) => `[opencode-herdr request ${r.id} generation ${r.generation}] ` +
     `Call read_task with requestId="${r.id}", generation=${r.generation}, deliveryId="${r.deliveryId}". ` +
@@ -147,18 +150,13 @@ export class DeliveryWorker {
         return { agent: persona, model, variant };
     }
     async live(expected) {
-        if (this.stopped || process.env.HERDR_ENV !== "1" || !process.env.HERDR_PANE_ID || !process.env.HERDR_SOCKET_PATH)
+        if (this.stopped || process.env.HERDR_ENV !== "1" || !process.env.HERDR_SOCKET_PATH)
             return;
         const agents = await this.discover();
-        const candidates = agents.filter(a => a.socket === process.env.HERDR_SOCKET_PATH && a.paneId === process.env.HERDR_PANE_ID);
-        if (candidates.length !== 1)
-            return;
-        const agent = candidates[0];
-        if (agent.directory !== this.directory || agent.machineId !== this.store.machineId ||
-            agents.filter(a => a.socket === agent.socket && (a.sessionId === agent.sessionId || a.terminalId === agent.terminalId)).length !== 1)
-            return;
-        const pinned = expected ?? this.store.agent(agent.id);
-        if (["id", "machineId", "sessionId", "socket", "paneId", "terminalId", "workspaceId", "directory"].some(key => agent[key] !== pinned[key]))
+        const agent = agents.find(a => a.socket === process.env.HERDR_SOCKET_PATH && a.directory === this.directory &&
+            IDENTITY_KEYS.every(key => a[key] === expected[key]));
+        if (!agent || agent.machineId !== this.store.machineId ||
+            agents.filter(a => a.socket === process.env.HERDR_SOCKET_PATH && (a.sessionId === agent.sessionId || a.terminalId === agent.terminalId)).length !== 1)
             return;
         return agent;
     }
@@ -179,8 +177,37 @@ export class DeliveryWorker {
         return this.active;
     }
     async scan() {
-        const agent = await this.live();
-        if (!agent || this.stopped)
+        if (process.env.HERDR_ENV !== "1" || !process.env.HERDR_SOCKET_PATH)
+            return;
+        const agents = await this.discover();
+        if (this.stopped)
+            return;
+        // The original build served the single agent bound to this server's pane.
+        // The desktop generation shares one server across panes, so the worker
+        // serves every Herdr-reported agent in its own directory. One live record
+        // per session or terminal still guards against duplicate bindings.
+        const local = agents.filter(a => a.socket === process.env.HERDR_SOCKET_PATH && a.directory === this.directory);
+        for (const agent of local) {
+            if (this.stopped)
+                return;
+            if (agents.filter(a => a.socket === process.env.HERDR_SOCKET_PATH && (a.sessionId === agent.sessionId || a.terminalId === agent.terminalId)).length !== 1)
+                continue;
+            await this.serve(agent);
+        }
+    }
+    // Sidebar publication, then at most one queue action per agent, then notices
+    // only while the agent has no pending request.
+    async serve(agent) {
+        if (agent.machineId !== this.store.machineId)
+            return;
+        let pinned;
+        try {
+            pinned = this.store.agent(agent.id);
+        }
+        catch {
+            return;
+        }
+        if (IDENTITY_KEYS.some(key => agent[key] !== pinned[key]))
             return;
         try {
             const local = this.store.list(agent.sessionId);

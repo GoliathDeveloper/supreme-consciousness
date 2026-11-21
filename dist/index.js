@@ -134,11 +134,18 @@ export default Plugin.define({
             if (!sessionID || sessionID.startsWith("remote:"))
                 throw new Error("A local host-authenticated conversation is required");
             const live = await inventory(store);
-            const self = live.find(a => a.sessionId === sessionID && a.paneId === process.env.HERDR_PANE_ID && a.socket === process.env.HERDR_SOCKET_PATH && a.directory === directory);
-            if (!self)
+            // The TUI generation bound a tool call to HERDR_PANE_ID from a per-pane
+            // server environment. The desktop generation shares one server across
+            // panes, so the service environment cannot carry the calling pane; the
+            // shim's session↔pane binding from Herdr's live layout is the pane
+            // authority here. The conversation must be reported exactly once.
+            const matches = live.filter(a => a.sessionId === sessionID && a.directory === directory);
+            if (matches.length > 1)
+                throw new Error("Conversation is reported in more than one Herdr pane; close the duplicate and refresh");
+            if (matches.length === 0)
                 throw new Error("Current conversation is not reported by Herdr. Install Herdr's OpenCode session integration and refresh.");
             origins.add(sessionID);
-            return self;
+            return matches[0];
         };
         const refresh = () => {
             if (stopped || !configured || reconciliation)

@@ -267,13 +267,29 @@ test('cancellation during preflight prevents the claim and leaves notices pendin
   expect(f.store.notices()[0].state).toBe('pending')
 })
 
-test.each(['HERDR_ENV', 'HERDR_SOCKET_PATH', 'HERDR_PANE_ID'])('requires the current process %s binding', async key => {
+test.each(['HERDR_ENV', 'HERDR_SOCKET_PATH'])('requires the current process %s binding', async key => {
   const f = fixture()
   f.enqueue()
   process.env[key] = 'different'
   await f.worker().tick()
   expect(f.session.promptAsync).not.toHaveBeenCalled()
   expect(f.publish).not.toHaveBeenCalled()
+})
+
+// The desktop generation shares one OpenCode server across panes, so a single
+// HERDR_PANE_ID cannot bind the worker to one pane. A stale or symbolic value
+// must not block service of the directory's agents; the binding authority is
+// the store's pinned identity (refused per key below) plus directory scope.
+test('serves the directory despite a stale HERDR_PANE_ID, and still refuses changed bindings', async () => {
+  const f = fixture()
+  f.enqueue()
+  process.env.HERDR_PANE_ID = 'different'
+  await f.worker().tick()
+  expect(f.publish).toHaveBeenCalledTimes(1)
+  expect(f.session.promptAsync).toHaveBeenCalledTimes(1)
+  f.discover.mockImplementation(async () => [{ ...f.agent, paneId: '/different' }])
+  await f.worker().tick()
+  expect(f.session.promptAsync).toHaveBeenCalledTimes(1)
 })
 
 test.each(['id', 'machineId', 'sessionId', 'socket', 'paneId', 'terminalId', 'workspaceId', 'directory'])('refuses mismatched live %s', async key => {
