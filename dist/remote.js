@@ -210,7 +210,10 @@ export class RemoteTransport {
         if (Buffer.byteLength(stdin) > remoteLimits.requestBytes)
             throw new Error('Remote request too large');
         // execFile protects the local shell; POSIX single-quoting protects the SSH remote shell.
-        const command = `bun '${p.helperPath.replaceAll("'", "'\\''")}'`;
+        // The runtime is configurable: the remote host's non-interactive SSH PATH is
+        // minimal (no bun/node) — HERDR_HELPER_RUNTIME names an absolute runtime there.
+        const runtime = process.env.HERDR_HELPER_RUNTIME ?? "bun";
+        const command = `${runtime} '${p.helperPath.replaceAll("'", "'\\''")}'`;
         let timer;
         try {
             const output = await Promise.race([
