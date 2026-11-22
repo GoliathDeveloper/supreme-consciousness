@@ -191,6 +191,13 @@ export class RemoteTransport {
     store;
     runner;
     peers;
+    // peerId → resolved remote runtime ('bun', 'node', or an absolute path).
+    // Probed once per peer: the remote host's non-interactive SSH PATH is
+    // minimal, and assuming 'bun' broke the Mini (only node there). The probe
+    // goes through the runner with empty stdin; the real runSSH passes the
+    // command to the remote shell (which ignores stdin), and test mocks see a
+    // command that is clearly not a protocol request.
+    runtimes = new Map();
     constructor(store, peers, runner = runSSH) {
         this.store = store;
         this.runner = runner;
@@ -198,6 +205,29 @@ export class RemoteTransport {
         this.peers = new Map(configured.map(p => [p.id, p]));
         if (configured.length !== this.peers.size)
             throw new Error('Duplicate peer ID');
+    }
+    // Resolve the JS runtime on the remote host. HERDR_HELPER_RUNTIME (an
+    // absolute remote path) wins; otherwise probe once per peer. The remote
+    // shell is non-interactive — on macOS its PATH is /usr/bin:/bin:/usr/sbin:/sbin,
+    // which hides /usr/local/bin/node and ~/.bun/bin/bun, so the probe falls back
+    // to the standard install locations by absolute path. Returns 'bun', 'node',
+    // or an absolute path; 'none' means no runtime was found.
+    async runtimeFor(p) {
+        const cached = this.runtimes.get(p.id);
+        if (cached)
+            return cached;
+        const override = process.env.HERDR_HELPER_RUNTIME;
+        if (override) {
+            this.runtimes.set(p.id, override);
+            return override;
+        }
+        const probe = await this.runner(p.sshTarget, `p=$(command -v bun 2>/dev/null) || p=$(command -v node 2>/dev/null); [ -n "$p" ] || { [ -x "$HOME/.bun/bin/bun" ] && p="$HOME/.bun/bin/bun"; }; [ -n "$p" ] || { [ -x /usr/local/bin/node ] && p=/usr/local/bin/node; }; [ -n "$p" ] || { [ -x /opt/homebrew/bin/node ] && p=/opt/homebrew/bin/node; }; [ -n "$p" ] && echo "$p" || echo none`, '');
+        const found = probe.trim();
+        if (found !== 'bun' && found !== 'node' && !found.startsWith('/')) {
+            throw new Error(`No JS runtime on ${p.sshTarget} — install bun or node, or set HERDR_HELPER_RUNTIME`);
+        }
+        this.runtimes.set(p.id, found);
+        return found;
     }
     configured(peerId) {
         const p = this.peers.get(peerId);
@@ -210,14 +240,18 @@ export class RemoteTransport {
         if (Buffer.byteLength(stdin) > remoteLimits.requestBytes)
             throw new Error('Remote request too large');
         // execFile protects the local shell; POSIX single-quoting protects the SSH remote shell.
-        // The runtime is configurable: the remote host's non-interactive SSH PATH is
-        // minimal (no bun/node) — HERDR_HELPER_RUNTIME names an absolute runtime there.
-        const runtime = process.env.HERDR_HELPER_RUNTIME ?? "bun";
-        const command = `${runtime} '${p.helperPath.replaceAll("'", "'\\''")}'`;
+        // The runtime is auto-detected per peer (bun → node); HERDR_HELPER_RUNTIME
+        // overrides with an absolute remote path.
         let timer;
         try {
+            // The deadline covers the probe too: a hung SSH probe must fail the same
+            // bounded way a hung exchange does, not hang the caller unbounded.
             const output = await Promise.race([
-                this.runner(p.sshTarget, command, stdin),
+                (async () => {
+                    const runtime = await this.runtimeFor(p);
+                    const command = `${runtime} '${p.helperPath.replaceAll("'", "'\\''")}'`;
+                    return this.runner(p.sshTarget, command, stdin);
+                })(),
                 new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Remote timeout')), remoteLimits.timeoutMs); }),
             ]);
             if (Buffer.byteLength(output) > remoteLimits.outputBytes)
@@ -236,13 +270,36 @@ export class RemoteTransport {
         }
     }
     async rpc(p, sessionId, op, args) {
-        await this.exchange(p, sessionId, 'handshake', {});
-        return this.exchange(p, sessionId, op, args);
+        // One bounded deadline for handshake + operation: a hung peer must fail
+        // both calls the same way a hung single exchange does.
+        const work = (async () => {
+            await this.exchange(p, sessionId, 'handshake', {});
+            return this.exchange(p, sessionId, op, args);
+        })();
+        let timer;
+        try {
+            return await Promise.race([
+                work,
+                new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Remote timeout')), remoteLimits.timeoutMs); }),
+            ]);
+        }
+        finally {
+            clearTimeout(timer);
+        }
     }
     async handshake(peerId, sessionId = 'discovery') {
         const p = this.configured(peerId);
-        await this.exchange(p, sessionId, 'handshake', {});
-        return { machineId: p.expectedMachineId };
+        let timer;
+        try {
+            await Promise.race([
+                this.exchange(p, sessionId, 'handshake', {}),
+                new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Remote timeout')), remoteLimits.timeoutMs); }),
+            ]);
+            return { machineId: p.expectedMachineId };
+        }
+        finally {
+            clearTimeout(timer);
+        }
     }
     async list(peerId, sessionId = 'discovery') {
         const result = await this.rpc(this.configured(peerId), sessionId, 'agents', {});

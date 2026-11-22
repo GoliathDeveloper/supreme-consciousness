@@ -11,10 +11,15 @@ theme and other panels stay as they are.
 
 ## What you see
 
-- A **Coordination** block (sized by your layout) with four sections:
+- A **Coordination** block (sized by your layout) with five sections:
   - **Agent rows**: one per live OpenCode pane — merged status (TUI signal +
     server execution map), per-pane `in / out / wait` counters, and both
     signals shown when they disagree (`working · tui reports idle`).
+  - **Remote peers**: one row per configured SSH peer — reachability, agent
+    count on the peer, or the reason it was unreachable. Fed by a name +
+    counts snapshot (`metadata/peers.json`) the plugin's refresh loop
+    publishes every few seconds; tokens never appear in it. Stale snapshot =
+    the coordinating service is quiet, not that the peer went away.
   - **Hello test**: a **▶ say hello** button that starts an agent-to-agent
     greeting cascade, a **✕ cancel** button, and a live leg watch — every leg
     with its state, the handback summaries, and a verdict line.
@@ -99,6 +104,9 @@ On the machine whose agents should join the mesh:
 
 The plugin's own README covers agent-to-agent requests, the integrity guard,
 cross-machine peers (SSH + token pairing) and the request lifecycle.
+Cross-machine note: the peer needs bun or node; the helper runtime is
+auto-detected per peer (PATH, then `~/.bun/bin/bun`, `/usr/local/bin/node`,
+`/opt/homebrew/bin/node`) and `HERDR_HELPER_RUNTIME` overrides.
 
 ## Watch out
 

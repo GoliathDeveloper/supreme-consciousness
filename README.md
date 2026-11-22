@@ -113,6 +113,15 @@ peer machine's store over SSH (`src/remote.ts`): the peer's store owns delivery
 there, and results/questions stream back as notices into local operations —
 identity, revisions and history snapshots are validated before caching.
 
+**Cross-machine prerequisite.** A peer needs a JavaScript runtime (bun or node)
+on the remote host. The helper runtime is auto-detected per peer — `command -v`
+first, then the standard install locations (`~/.bun/bin/bun`,
+`/usr/local/bin/node`, `/opt/homebrew/bin/node`), because a non-interactive SSH
+shell has a minimal PATH (on macOS: `/usr/bin:/bin:/usr/sbin:/sbin`).
+`HERDR_HELPER_RUNTIME` (an absolute remote path) overrides, for runtimes
+installed elsewhere. The deadline that bounds every exchange covers the probe
+too, so a hung peer or hung SSH fails loudly instead of hanging the caller.
+
 **What the sidebar shows.** The `$herdr_inbox` / `$herdr_outbox` / `$herdr_wait`
 tokens are projections of exactly these rows (highest-priority state + retained
 count), published by the workers through the shim for the mod to render.
@@ -173,6 +182,8 @@ translates to the installed desktop generation:
 | Plugin call | Shim translation |
 | --- | --- |
 | `herdr agent list` | `herdr-app ls` + `hc get` (panes, cwd) + OpenCode `/api/session` + `/api/session/active` (session identity + running state) |
+| `herdr peers` | Reads the Remote peers snapshot the plugin publishes to `metadata/peers.json` (name + counts, never tokens) for the mod's Remote peers section |
+| `herdr review <limit>` | Read-only projection of the coordination store for human review |
 | `herdr pane split/get/list/close/run` | `herdr-app do pane.*` / `terminal.open` / `hc send` |
 | `herdr pane report-metadata` | Writes sidebar tokens to `~/.local/state/supreme-consciousness/metadata/<pane>.json` for the mod |
 | `herdr pane of-terminal <t>` | Helper used by `~/.zshrc` to resolve `HERDR_PANE_ID` from `HC_TERMINAL_ID` |

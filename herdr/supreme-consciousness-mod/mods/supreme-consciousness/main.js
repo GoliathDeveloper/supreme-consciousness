@@ -50,6 +50,7 @@ export default class CoordinationPanel extends View {
   init(props, cx) {
     this.tokens = {};
     this.agents = [];
+    this.peers = [];
     this.history = [];
     this.feed = [];
     this.processed = 0;
@@ -69,7 +70,7 @@ export default class CoordinationPanel extends View {
   async refresh() {
     try {
       const listing = await exec("/bin/ls", ["-1", METADATA()]);
-      const names = (listing.stdout || "").split("\n").filter((n) => n.endsWith(".json"));
+      const names = (listing.stdout || "").split("\n").filter((n) => n.endsWith(".json") && n !== "peers.json");
       const tokens = {};
       for (const name of names) {
         const raw = await readTextFile(`${METADATA()}/${name}`);
@@ -100,6 +101,16 @@ export default class CoordinationPanel extends View {
     } catch (error) {
       this.agents = [];
       this.error = this.error ?? `Agent inventory unavailable: ${String(error).slice(0, 120)}`;
+    }
+    // Remote peers: the plugin's refresh loop publishes a name + counts
+    // snapshot of its configured SSH peers (never tokens). A missing file or
+    // failed read is an empty section, not an error — peers are optional.
+    try {
+      const listed = await exec("herdr", ["peers"]);
+      const parsed = JSON.parse(listed.stdout || "{}")?.result;
+      this.peers = Array.isArray(parsed?.peers) ? parsed.peers : [];
+    } catch {
+      this.peers = [];
     }
     try {
       const review = await exec("herdr", ["review", "24"]);
@@ -197,6 +208,25 @@ export default class CoordinationPanel extends View {
         .child(this.tokenRow("in", this.token(pane, "herdr_inbox")))
         .child(this.tokenRow("out", this.token(pane, "herdr_outbox")))
         .child(this.tokenRow("wait", this.token(pane, "herdr_wait"))));
+  }
+
+  peerRow(p) {
+    const t = theme();
+    // The plugin refreshes this snapshot every few seconds; an old checkedAt
+    // means the coordinating service is quiet (stopped or asleep), not that
+    // the peer went away — show that honestly instead of a fake offline.
+    const stale = !p.checkedAt || (Date.now() - Number(p.checkedAt)) > 30_000;
+    const online = p.error == null && p.agents !== undefined && !stale;
+    const dot = online ? t.done : p.error ? t.blocked : t.idle;
+    const status = p.error ? clip(p.error, 90)
+      : p.agents !== undefined ? `${p.agents} agent${p.agents === 1 ? "" : "s"} reachable`
+      : stale ? "snapshot stale — service quiet" : "checking…";
+    return v_flex().id(`peer-${p.id}`).gap(3).p(8).rounded(6).bg(t.canvas)
+      .child(h_flex().gap(6).items_center()
+        .child(div().size(7).rounded(4).flex_none().bg(dot))
+        .child(div().flex_1().text_color(t.foreground).child(p.id))
+        .child(div().text_color(p.error ? t.blocked : online ? t.done : t.dim).child(status)))
+      .child(div().text_color(t.dim).text_size(10.5).child(clip(p.sshTarget, 70)));
   }
 
   historyRow(entry, liveBySession) {
@@ -339,6 +369,7 @@ export default class CoordinationPanel extends View {
   render() {
     const t = theme();
     const list = this.agents ?? [];
+    const peers = this.peers ?? [];
     const history = this.history ?? [];
     const feed = this.feed ?? [];
     const pending = this.pendingWork();
@@ -354,6 +385,12 @@ export default class CoordinationPanel extends View {
       .when(Boolean(this.error), (el) => el.child(div().text_color(t.blocked).child(this.error)))
       .when(list.length === 0 && !this.error, (el) => el.child(div().text_color(t.dim).child("No OpenCode agents reported by the herdr shim")))
       .when(list.length > 0, (el) => el.children(list.map(a => this.safe(`agentRow ${a.pane_id?.slice(0, 8)}`, () => this.agentRow(a, pending)))))
+      .child(h_flex().gap(6).items_center().pt(4)
+        .child(div().font_weight(600).text_color(t.foreground).child("Remote peers"))
+        .child(div().flex_1())
+        .child(div().text_color(t.dim).child(`${peers.length} configured`)))
+      .when(peers.length === 0, (el) => el.child(div().text_color(t.dim).child("No SSH peers — cross-machine agents appear here once peers.json is configured")))
+      .when(peers.length > 0, (el) => el.children(peers.map(p => this.safe(`peer ${p.id}`, () => this.peerRow(p)))))
       .child(h_flex().gap(6).items_center().pt(4)
         .child(div().font_weight(600).text_color(t.foreground).child("Now"))
         .child(div().flex_1())

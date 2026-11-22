@@ -1,9 +1,12 @@
 import { Plugin } from "@opencode/plugin";
 import type { PluginInput, ToolContext } from "@opencode-ai/plugin";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { Store } from "./store.js";
 import { DeliveryWorker, inventory, requestPrompt } from "./delivery.js";
 import { Provisioner } from "./provision.js";
-import { readRemoteConfig, RemoteTransport, remoteOutbox, type RemotePeer } from "./remote.js";
+import { readRemoteConfig, RemoteTransport, remoteOutbox, type PeerStatus, type RemotePeer } from "./remote.js";
 import { verifyRelay } from "./verify.js";
 import type { Outcome } from "./model.js";
 
@@ -181,8 +184,35 @@ export default Plugin.define({
             await remote.sync(peer.id, origin);
           }
         }
+        await publishPeers();
       })().catch(() => console.error("supreme-consciousness: operation reconciliation deferred"))
         .finally(() => { reconciliation = undefined; });
+    };
+    // Remote peers for the GUI's Remote peers section. Written next to the
+    // per-pane metadata files the mod already watches; the shim's `herdr
+    // peers` command reads it back. Tokens never leave this file — it is a
+    // name + counts snapshot, mode 0600, and a missing peer degrades to an
+    // error row instead of vanishing.
+    const metaDir = join(process.env.XDG_STATE_HOME || join(homedir(), ".local/state"), "supreme-consciousness", "metadata");
+    const peersFile = join(metaDir, "peers.json");
+    let lastPeers: string | undefined;
+    const publishPeers = async () => {
+      const statuses: PeerStatus[] = [];
+      for (const peer of peers) {
+        try {
+          const agents = await remote.list(peer.id);
+          statuses.push({ id: peer.id, sshTarget: peer.sshTarget, machineId: peer.expectedMachineId, agents: agents.length, checkedAt: Date.now() });
+        } catch (error) {
+          statuses.push({ id: peer.id, sshTarget: peer.sshTarget, machineId: peer.expectedMachineId, error: String((error as Error)?.message ?? error).slice(0, 200), checkedAt: Date.now() });
+        }
+      }
+      const serialised = JSON.stringify(statuses, null, 2);
+      if (serialised === lastPeers) return;
+      try {
+        mkdirSync(metaDir, { recursive: true, mode: 0o700 });
+        writeFileSync(peersFile, serialised, { mode: 0o600 });
+        lastPeers = serialised;
+      } catch { /* display availability must never change lifecycle state */ }
     };
     const target = async (identity: string) => {
       const live = await inventory(store);
@@ -394,6 +424,7 @@ export default Plugin.define({
       await worker.dispose();
       await reconciliation;
       events.abort();
+      try { rmSync(peersFile, { force: true }); } catch { /* best effort */ }
       store.close();
     };
   },

@@ -122,6 +122,8 @@ function remoteFixture() {
     expectedMachineId: string; token: string; args: Record<string, unknown> }[] = []
   let loseEnqueueReceipt = false
   const runner: RemoteRunner = async (target, command, stdin) => {
+    // The runtime probe is shell, not the protocol: pass it through.
+    if (command.includes('command -v bun')) return 'bun\n'
     expect(target).toBe(peer.sshTarget)
     expect(command).toBe("bun '/fake/remote-helper.js'")
     const packet = JSON.parse(stdin)

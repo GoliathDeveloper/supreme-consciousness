@@ -32,6 +32,8 @@ function fixture() {
   const packet = (op = 'enqueue', args: unknown = { ...input, originSessionId: undefined }) => ({ protocolVersion: 1, originMachineId: sender.machineId, originSessionId: input.originSessionId, expectedMachineId: receiver.machineId, token: secret, op, args: JSON.parse(JSON.stringify(args)) })
   const calls: { target: string; command: string; packet: ReturnType<typeof packet> }[] = []
   const runner: RemoteRunner = async (target, command, stdin) => {
+    // The runtime probe is shell, not the protocol: pass it through.
+    if (command.includes('command -v bun')) return 'bun\n'
     const request = JSON.parse(stdin)
     calls.push({ target, command, packet: request })
     return JSON.stringify(handleRequest(receiver, trust, request))
@@ -70,6 +72,7 @@ test('lost enqueue receipt can retry the same key after restart without redelive
   const f = fixture()
   let loseReceipt = true
   const runner: RemoteRunner = async (...args) => {
+    if (args[1].includes('command -v bun')) return 'bun\n'
     const output = await f.runner(...args)
     if (JSON.parse(args[2]).op === 'enqueue' && loseReceipt) {
       loseReceipt = false
@@ -100,7 +103,10 @@ test('lost enqueue receipt can retry the same key after restart without redelive
 
 test('recovery never replays persisted intents through changed endpoints', async () => {
   const f = fixture()
-  const offline = new RemoteTransport(f.sender, [f.peer], async () => { throw new Error('offline') })
+  const offline = new RemoteTransport(f.sender, [f.peer], async (target, command) => {
+    if (command.includes('command -v bun')) return 'bun\n'
+    throw new Error('offline')
+  })
   await expect(offline.request('other', f.input)).rejects.toThrow()
   for (const changed of [{ sshTarget: 'changed' }, { helperPath: '/different/helper.js' }, { expectedMachineId: f.sender.machineId }]) {
     const client = new RemoteTransport(f.sender, [{ ...f.peer, ...changed }], f.runner)
@@ -157,6 +163,7 @@ test('delayed snapshots cannot regress request generation or full history', asyn
   let captured!: () => void
   const ready = new Promise<void>(resolve => { captured = resolve })
   const slow = new RemoteTransport(f.sender, [f.peer], async (...args) => {
+    if (args[1].includes('command -v bun')) return 'bun\n'
     const output = await f.runner(...args)
     if (JSON.parse(args[2]).op !== 'inspect') return output
     return new Promise<string>(resolve => { release = resolve; captured(); delayedOutput = output })
@@ -184,6 +191,7 @@ test('late transport failures cannot overwrite a newer same-revision success', a
   let captured!: () => void
   const ready = new Promise<void>(resolve => { captured = resolve })
   const slow = new RemoteTransport(f.sender, [f.peer], async (...args) => {
+    if (args[1].includes('command -v bun')) return 'bun\n'
     if (JSON.parse(args[2]).op !== 'inspect') return f.runner(...args)
     return new Promise<string>((_, reject) => { fail = reject; captured() })
   })
@@ -208,9 +216,10 @@ test('same-generation delayed question history cannot resurrect an answered ques
   await f.client.reply('other', question.id, f.input.originSessionId, 'Proceed')
   const latest = f.sender.operations(f.input.originSessionId)[0]
   expect((latest.result!.request as ReturnType<Store['request']>).revision).toBeGreaterThan(stale.request.revision)
-  const delayed = new RemoteTransport(f.sender, [f.peer], async (...args) => JSON.parse(args[2]).op === 'inspect'
-    ? JSON.stringify({ protocolVersion: 1, machineId: f.receiver.machineId, ok: true, result: stale })
-    : f.runner(...args))
+  const delayed = new RemoteTransport(f.sender, [f.peer], async (...args) => args[1].includes('command -v bun') ? 'bun\n'
+    : JSON.parse(args[2]).op === 'inspect'
+      ? JSON.stringify({ protocolVersion: 1, machineId: f.receiver.machineId, ok: true, result: stale })
+      : f.runner(...args))
   await delayed.inspect('other', request.id, f.input.originSessionId).catch(() => {})
   expect(f.sender.operations(f.input.originSessionId)[0].result).toEqual(latest.result)
   expect(f.sender.notices(f.input.originSessionId).filter(notice => notice.state === 'pending')).toHaveLength(0)
@@ -238,7 +247,8 @@ test('response identity is pinned even if a helper ignores the request binding',
     { protocolVersion: 2, machineId: f.receiver.machineId, ok: true, result: {} },
     { protocolVersion: 1, machineId: f.receiver.machineId, ok: false, error: secret },
   ]) {
-    const client = new RemoteTransport(f.sender, [f.peer], async () => JSON.stringify(response))
+    const client = new RemoteTransport(f.sender, [f.peer], async (target, command) =>
+      command.includes('command -v bun') ? 'bun\n' : JSON.stringify(response))
     await expect(client.handshake('other')).rejects.toThrow('unknown')
   }
 })
@@ -319,9 +329,11 @@ test('request and response byte limits reject without leaking remote diagnostics
   await expect(f.client.request('other', { ...f.input, text: 'x'.repeat(remoteLimits.requestBytes) })).rejects.toThrow('too large')
   expect(f.calls).toHaveLength(0)
   expect(() => handleRequest(f.receiver, f.trust, f.packet('enqueue', { ...f.packet().args, text: 'x'.repeat(remoteLimits.requestBytes) }))).toThrow('too large')
-  const oversized = new RemoteTransport(f.sender, [f.peer], async () => 'x'.repeat(remoteLimits.outputBytes + 1))
+  const oversized = new RemoteTransport(f.sender, [f.peer], async (target, command) =>
+    command.includes('command -v bun') ? 'bun\n' : 'x'.repeat(remoteLimits.outputBytes + 1))
   await expect(oversized.handshake('other')).rejects.toThrow('unknown')
-  const malformed = new RemoteTransport(f.sender, [f.peer], async () => secret)
+  const malformed = new RemoteTransport(f.sender, [f.peer], async (target, command) =>
+    command.includes('command -v bun') ? 'bun\n' : secret)
   await expect(malformed.handshake('other')).rejects.toThrow('unknown')
 })
 

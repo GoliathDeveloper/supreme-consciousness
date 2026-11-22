@@ -459,6 +459,22 @@ async function review(limit = 20) {
   } };
 }
 
+// ——— herdr peers ————————————————————————————————————————————————————————————
+// The plugin's refresh loop writes a name + counts snapshot of its configured
+// SSH peers next to the pane metadata files (never tokens). The GUI mod reads
+// it back here to render the Remote peers section; a missing file means "no
+// peers configured" — the mod shows an empty section rather than an error.
+
+const peersFile = () => join(METADATA_DIR, 'peers.json');
+
+async function peers() {
+  try {
+    return { result: { peers: JSON.parse(readFileSync(peersFile(), 'utf8')) } };
+  } catch {
+    return { result: { peers: [] } };
+  }
+}
+
 // ——— argv —————————————————————————————————————————————————————————————————————
 
 const argv = process.argv.slice(2);
@@ -481,6 +497,8 @@ try {
         break;
       case 'review':
         return out(await review(Number(positional[0]) || Number(flags.limit) || 20));
+      case 'peers':
+        return out(await peers());
       case 'session':
         if (positional[0] === 'orphans') return out(await sessionOrphans());
         fail('usage: herdr session orphans');
@@ -498,7 +516,7 @@ try {
         break;
       }
       default:
-        fail(`herdr shim: unsupported command "${command ?? '(missing)'}". Supported: agent list, pane split|get|list|close|run|report-metadata|of-terminal`);
+        fail(`herdr shim: unsupported command "${command ?? '(missing)'}". Supported: agent list, peers, review, session orphans, pane split|get|list|close|run|report-metadata|of-terminal`);
     }
   })();
 } catch (error) {
