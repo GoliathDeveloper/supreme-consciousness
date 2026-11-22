@@ -2,7 +2,7 @@ import { expect, setSystemTime, spyOn, test } from "bun:test";
 import { ensureRuntimePluginSupport } from "@opentui/solid/runtime-plugin-support/configure";
 import { testRender } from "@opentui/solid";
 import { RGBA, TextRenderable, type BaseRenderable } from "@opentui/core";
-import { createSignal, getOwner, runWithOwner } from "solid-js";
+import { createSignal } from "solid-js";
 import { createSidebarPublisher, queueTokens, requestPresentation, type Request } from "../src/sidebar.js";
 
 ensureRuntimePluginSupport();
@@ -34,9 +34,9 @@ test("mailbox collapses sections, limits latest rows and opens authorised read-o
   const { Mailbox } = await import("../dist/mailbox.jsx");
   let selected: any;
   let alert: any;
-  let owner: ReturnType<typeof getOwner>;
   const historyCalls: string[][] = [];
   let denied = false;
+  const selectQueue: unknown[] = [];
   const [primary, setPrimary] = createSignal("#00ffff");
   const inbox = Array.from({ length: 7 }, (_, index) => request({ id: `req-${index}`, sequence: index, updatedAt: index }));
   const outbox = [
@@ -47,9 +47,10 @@ test("mailbox collapses sections, limits latest rows and opens authorised read-o
   const api = {
     theme: { current: { text: "white", textMuted: "gray", warning: "yellow", get primary() { return primary(); }, accent: "magenta", success: "green", error: "red" } },
     ui: {
-      dialog: { replace(render: () => unknown) { runWithOwner(owner!, render); } },
-      DialogSelect(props: any) { selected = { ...props }; return null; },
-      DialogAlert(props: unknown) { alert = props; return null; },
+      dialog: {
+        alert: async (input: unknown) => { alert = input; },
+        select: async (input: unknown) => { selected = input; return selectQueue.shift(); },
+      },
     },
   };
   const store = {
@@ -60,10 +61,7 @@ test("mailbox collapses sections, limits latest rows and opens authorised read-o
       return { events: ["authorised-history"], text: "authorised-body" };
     },
   };
-  const view = await testRender(() => {
-    owner = getOwner();
-    return Mailbox({ api, sessionID: "origin", store });
-  }, { width: 72, height: 35 });
+  const view = await testRender(() => Mailbox({ api, sessionID: "origin", store }), { width: 72, height: 35 });
   const click = async (label: string) => {
     const lines = view.captureCharFrame().split("\n");
     const y = lines.findIndex((line) => line.includes(label));
@@ -99,10 +97,14 @@ test("mailbox collapses sections, limits latest rows and opens authorised read-o
     await click("Browse all (7)");
     expect(selected.options).toHaveLength(7);
     expect(selected.options[6].value.id).toBe("req-0");
-    selected.onSelect(selected.options[6]);
+    selectQueue.push(selected.options[6].value);
+    await click("Browse all (7)");
+    await Bun.sleep(0);
     expect(historyCalls[1]).toEqual(["req-0", "origin"]);
     denied = true;
-    selected.onSelect(selected.options[0]);
+    selectQueue.push(selected.options[0].value);
+    await click("Browse all (7)");
+    await Bun.sleep(0);
     expect(alert.message).toContain("details unavailable");
     expect(alert.message).not.toContain("PRIVATE");
     await click("\u25b8 Outbox");

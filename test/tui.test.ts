@@ -17,12 +17,12 @@ test("sidebar renders real OpenTUI content, wraps narrow rows, and collapses", a
     await writeFile(path, '[keys]\nprefix = "ctrl+a"\n[[keys.command]]\nkey = "prefix+f"\ndescription = "Projects"\ncommand = "never-execute-this"');
     const { default: plugin } = await import("../dist/tui.jsx");
     let slot;
-    const api = {
-      theme: { current: { text: "white", textMuted: "gray", warning: "yellow", primary: "cyan" } },
-      slots: { register(value) { slot = value.slots.sidebar_content; } },
-    };
-    await plugin.tui(api, { configPath: path, coordination: false });
-    const view = await testRender(() => slot({}, { session_id: "test" }), { width: 28, height: 50 });
+    await plugin.setup({
+      options: { configPath: path, coordination: false },
+      theme: { text: "white", textMuted: "gray", warning: "yellow", primary: "cyan" },
+      ui: { slot: (input: { render: unknown }) => { slot = input.render; }, dialog: { alert: async () => {}, select: async () => undefined } },
+    } as never);
+    const view = await testRender(() => (slot as (props: { sessionID: string }) => unknown)({ sessionID: "test" }), { width: 28, height: 50 });
     renderer = view.renderer;
     await view.renderOnce();
     expect(view.captureCharFrame()).toContain("\u25b8 Herdr shortcuts");
@@ -75,7 +75,7 @@ test("no sidebar registration outside Herdr", async () => {
   try {
     const { default: plugin } = await import("../dist/tui.jsx");
     let registered = false;
-    await plugin.tui({ slots: { register() { registered = true; } } });
+    await plugin.setup({ options: {}, theme: {}, ui: { slot: () => { registered = true; }, dialog: {} } } as never);
     expect(registered).toBe(false);
   } finally {
     if (old !== undefined) process.env.HERDR_ENV = old;
@@ -89,11 +89,12 @@ test("unreadable config renders a warning, not misleading default shortcuts", as
   try {
     const { default: plugin } = await import("../dist/tui.jsx");
     let slot;
-    await plugin.tui({
-      theme: { current: { text: "white", textMuted: "gray", warning: "yellow", primary: "cyan" } },
-      slots: { register(value) { slot = value.slots.sidebar_content; } },
-    }, { configPath: tmpdir(), coordination: false });
-    const view = await testRender(() => slot({}, { session_id: "test" }), { width: 32, height: 12 });
+    await plugin.setup({
+      options: { configPath: tmpdir(), coordination: false },
+      theme: { text: "white", textMuted: "gray", warning: "yellow", primary: "cyan" },
+      ui: { slot: (input: { render: unknown }) => { slot = input.render; }, dialog: { alert: async () => {}, select: async () => undefined } },
+    } as never);
+    const view = await testRender(() => (slot as (props: { sessionID: string }) => unknown)({ sessionID: "test" }), { width: 32, height: 12 });
     renderer = view.renderer;
     await view.renderOnce();
     await view.mockMouse.click(2, 0);

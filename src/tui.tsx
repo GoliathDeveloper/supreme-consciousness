@@ -1,12 +1,36 @@
 /** @jsxImportSource @opentui/solid */
 import { createSignal, For, Show, onCleanup } from "solid-js";
-import type { TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
+import { Plugin } from "@opencode/plugin/tui";
 import { configPath, formatBinding, loadShortcuts, type Shortcuts } from "./shortcuts.js";
 import { Store } from "./store.js";
 import { Mailbox } from "./mailbox.jsx";
 import { remoteOutbox } from "./remote.js";
+import type { ThemeColours, TuiApi } from "./sidebar.js";
 
-function Coordination(props: { api: TuiPluginApi; sessionID: string }) {
+// The V2 theme resolves nested semantic tokens whose paths have changed across
+// releases; the projections speak the old flat palette. Map defensively — the
+// first string found wins, so older runtimes keep working.
+function flatColours(theme: unknown): ThemeColours {
+  const pick = (...paths: string[][]): string => {
+    for (const path of paths) {
+      let value: unknown = theme;
+      for (const key of path) value = (value as Record<string, unknown> | undefined)?.[key];
+      if (typeof value === "string") return value;
+    }
+    return "";
+  };
+  return {
+    text: pick(["text", "base"], ["base", "text", "base"], ["text"]),
+    textMuted: pick(["text", "muted"], ["base", "text", "muted"], ["textMuted"]),
+    primary: pick(["text", "action", "primary", "base"], ["base", "text", "action", "primary", "base"], ["primary"]),
+    accent: pick(["text", "action", "secondary", "base"], ["accent"]),
+    warning: pick(["text", "feedback", "warning", "base"], ["base", "feedback", "warning", "base"], ["warning"]),
+    error: pick(["text", "feedback", "error", "base"], ["error"]),
+    success: pick(["text", "feedback", "success", "base"], ["success"]),
+  };
+}
+
+function Coordination(props: { api: TuiApi; sessionID: string }) {
   let store: Store;
   try { store = new Store(); }
   catch { return <text fg={props.api.theme.current.warning}>Coordination store unavailable</text>; }
@@ -20,7 +44,7 @@ function Coordination(props: { api: TuiPluginApi; sessionID: string }) {
   }} />;
 }
 
-function Sidebar(props: { api: TuiPluginApi; shortcuts?: Shortcuts }) {
+function Sidebar(props: { api: TuiApi; shortcuts?: Shortcuts }) {
   const [expanded, setExpanded] = createSignal(false);
   const theme = () => props.api.theme.current;
   return <box flexDirection="column">
@@ -50,24 +74,33 @@ function Sidebar(props: { api: TuiPluginApi; shortcuts?: Shortcuts }) {
   </box>;
 }
 
-export default {
+export default Plugin.define({
   id: "opencode-herdr.shortcuts",
-  tui: async (api, options) => {
+  setup: async (context) => {
     if (process.env.HERDR_ENV !== "1") return;
-    if (options?.configPath !== undefined && (typeof options.configPath !== "string" || !options.configPath)) {
+    const options = context.options as { configPath?: unknown; coordination?: unknown };
+    if (options.configPath !== undefined && (typeof options.configPath !== "string" || !options.configPath)) {
       throw new Error("opencode-herdr: configPath must be a non-empty string");
     }
     let shortcuts: Shortcuts | undefined;
     try {
-      shortcuts = await loadShortcuts((options?.configPath as string | undefined) ?? configPath());
+      shortcuts = await loadShortcuts((options.configPath as string | undefined) ?? configPath());
     } catch {
       // A broken/unreadable config must not present defaults as the user's keys.
     }
-    api.slots.register({ order: 600, slots: {
-      sidebar_content: (_ctx, value) => <box flexDirection="column" gap={1}>
-        <Show when={options?.coordination !== false}><Coordination api={api} sessionID={value.session_id} /></Show>
+    const api: TuiApi = {
+      theme: { current: flatColours(context.theme) },
+      ui: { dialog: {
+        alert: (input) => void context.ui.dialog.alert(input),
+        select: async (input) => await context.ui.dialog.select(input as Parameters<typeof context.ui.dialog.select>[0]),
+      } },
+    };
+    context.ui.slot({
+      append: "sidebar.content",
+      render: ({ sessionID }) => <box flexDirection="column" gap={1}>
+        <Show when={options.coordination !== false}><Coordination api={api} sessionID={sessionID} /></Show>
         <Sidebar api={api} shortcuts={shortcuts} />
       </box>,
-    } });
+    });
   },
-} satisfies TuiPluginModule;
+});

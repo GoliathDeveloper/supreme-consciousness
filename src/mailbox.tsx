@@ -1,7 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { createEffect, createSignal, For, onCleanup, Show, untrack } from "solid-js";
-import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
-import { requestPresentation, type QueueProjection, type Request } from "./sidebar.js";
+import { requestPresentation, type QueueProjection, type Request, type TuiApi } from "./sidebar.js";
 
 export type { Request, QueueProjection } from "./sidebar.js";
 
@@ -10,12 +9,11 @@ export interface MailboxStore {
   history(id: string, sessionID: string): unknown;
 }
 
-export function Mailbox(props: { api: TuiPluginApi; sessionID: string; store: MailboxStore }) {
+export function Mailbox(props: { api: TuiApi; sessionID: string; store: MailboxStore }) {
   const [expanded, setExpanded] = createSignal(false);
   const [projection, setProjection] = createSignal<QueueProjection>();
   const [unavailable, setUnavailable] = createSignal(false);
   const theme = () => props.api.theme.current;
-  const { DialogAlert, DialogSelect } = props.api.ui;
 
   createEffect(() => {
     const sessionID = props.sessionID;
@@ -54,21 +52,21 @@ export function Mailbox(props: { api: TuiPluginApi; sessionID: string; store: Ma
     } catch {
       message = "Request details unavailable. Access may have changed. Try again later.";
     }
-    props.api.ui.dialog.replace(() => <DialogAlert title="Request details" message={message} />);
+    void props.api.ui.dialog.alert({ title: "Request details", message });
   };
 
-  const browse = (title: string, requests: Request[]) => {
+  const browse = async (title: string, requests: Request[]) => {
     const sessionID = props.sessionID;
-    props.api.ui.dialog.replace(() => <DialogSelect
-      title={title}
-      options={requests.map((request) => ({
+    const picked = await props.api.ui.dialog.select({
+      title,
+      options: requests.map((request) => ({
         title: `${request.kind === "task" ? "Task" : "Instruction"} ${request.id}`,
         value: request,
         description: requestPresentation(request).label,
-        footer: <text fg={theme()[requestPresentation(request).colour]}>{requestPresentation(request).label}</text>,
-      }))}
-      onSelect={(option) => details(option.value, sessionID)}
-    />);
+        footer: requestPresentation(request).label,
+      })),
+    });
+    if (picked) details(picked as Request, sessionID);
   };
 
   return <box flexDirection="column">

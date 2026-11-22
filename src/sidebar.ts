@@ -1,6 +1,21 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { TuiThemeCurrent } from "@opencode-ai/plugin/tui";
+
+// Flat palette the TUI projections speak. The V2 TUI theme resolves nested
+// semantic tokens whose paths vary across releases, so the TUI entry maps
+// them defensively into this flat shape (see flatColours in tui.tsx).
+export type ThemeColours = Record<"text" | "textMuted" | "primary" | "accent" | "warning" | "error" | "success", string>;
+
+// The V1 TUI runtime handed components a broad TuiPluginApi; the V2 contract
+// is Plugin.define + context. The projections keep speaking this narrow
+// adapter surface so the components stay runtime-agnostic.
+export interface TuiApi {
+  theme: { current: ThemeColours };
+  ui: { dialog: {
+    alert(input: { title: string; message: string }): void;
+    select(input: { title: string; options: { title: string; value: unknown; description?: string; footer?: string }[] }): Promise<unknown>;
+  } };
+}
 
 export interface Request {
   id: string;
@@ -29,7 +44,7 @@ export interface QueueProjection {
 
 export function requestPresentation(request: Pick<Request, "state" | "kind" | "validation">): {
   label: string;
-  colour: keyof Pick<TuiThemeCurrent, "primary" | "accent" | "warning" | "error" | "success" | "textMuted">;
+  colour: keyof ThemeColours;
   prefix: "blocked" | "active" | "queued" | "done" | "idle";
 } {
   const validation = typeof request.validation === "object" && request.validation !== null && "status" in request.validation

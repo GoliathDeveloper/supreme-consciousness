@@ -61,13 +61,13 @@ test("built sidebar renders persisted coordination alongside shortcuts without c
       text: "#ffffff", textMuted: "#808080", primary: "#00ffff",
       accent: "#ff00ff", warning: "#ffff00", success: "#00ff00", error: "#ff0000",
     };
-    await plugin.tui({
-      theme: { current: theme },
-      ui: { DialogAlert: () => null, DialogSelect: () => null },
-      slots: { register(value) { slot = value.slots.sidebar_content; } },
-    }, { configPath });
+    await plugin.setup({
+      options: { configPath },
+      theme,
+      ui: { slot: (input: { render: unknown }) => { slot = input.render; }, dialog: { alert: async () => {}, select: async () => undefined } },
+    } as never);
     expect(slot).toBeFunction();
-    view = await testRender(() => slot({}, { session_id: origin.sessionId }), { width: 80, height: 30 });
+    view = await testRender(() => (slot as (props: { sessionID: string }) => unknown)({ sessionID: origin.sessionId }), { width: 80, height: 30 });
     const rendered = view;
     const click = async (label: string) => {
       const lines = rendered.captureCharFrame().split("\n");

@@ -6,7 +6,6 @@ export function Mailbox(props) {
     const [projection, setProjection] = createSignal();
     const [unavailable, setUnavailable] = createSignal(false);
     const theme = () => props.api.theme.current;
-    const { DialogAlert, DialogSelect } = props.api.ui;
     createEffect(() => {
         const sessionID = props.sessionID;
         const store = props.store;
@@ -47,16 +46,21 @@ export function Mailbox(props) {
         catch {
             message = "Request details unavailable. Access may have changed. Try again later.";
         }
-        props.api.ui.dialog.replace(() => <DialogAlert title="Request details" message={message}/>);
+        void props.api.ui.dialog.alert({ title: "Request details", message });
     };
-    const browse = (title, requests) => {
+    const browse = async (title, requests) => {
         const sessionID = props.sessionID;
-        props.api.ui.dialog.replace(() => <DialogSelect title={title} options={requests.map((request) => ({
+        const picked = await props.api.ui.dialog.select({
+            title,
+            options: requests.map((request) => ({
                 title: `${request.kind === "task" ? "Task" : "Instruction"} ${request.id}`,
                 value: request,
                 description: requestPresentation(request).label,
-                footer: <text fg={theme()[requestPresentation(request).colour]}>{requestPresentation(request).label}</text>,
-            }))} onSelect={(option) => details(option.value, sessionID)}/>);
+                footer: requestPresentation(request).label,
+            })),
+        });
+        if (picked)
+            details(picked, sessionID);
     };
     return <box flexDirection="column">
     <text fg={theme().text} onMouseUp={() => setExpanded((value) => !value)}>

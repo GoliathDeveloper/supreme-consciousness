@@ -1,9 +1,34 @@
 /** @jsxImportSource @opentui/solid */
 import { createSignal, For, Show, onCleanup } from "solid-js";
+import { Plugin } from "@opencode/plugin/tui";
 import { configPath, formatBinding, loadShortcuts } from "./shortcuts.js";
 import { Store } from "./store.js";
 import { Mailbox } from "./mailbox.jsx";
 import { remoteOutbox } from "./remote.js";
+// The V2 theme resolves nested semantic tokens whose paths have changed across
+// releases; the projections speak the old flat palette. Map defensively — the
+// first string found wins, so older runtimes keep working.
+function flatColours(theme) {
+    const pick = (...paths) => {
+        for (const path of paths) {
+            let value = theme;
+            for (const key of path)
+                value = value?.[key];
+            if (typeof value === "string")
+                return value;
+        }
+        return "";
+    };
+    return {
+        text: pick(["text", "base"], ["base", "text", "base"], ["text"]),
+        textMuted: pick(["text", "muted"], ["base", "text", "muted"], ["textMuted"]),
+        primary: pick(["text", "action", "primary", "base"], ["base", "text", "action", "primary", "base"], ["primary"]),
+        accent: pick(["text", "action", "secondary", "base"], ["accent"]),
+        warning: pick(["text", "feedback", "warning", "base"], ["base", "feedback", "warning", "base"], ["warning"]),
+        error: pick(["text", "feedback", "error", "base"], ["error"]),
+        success: pick(["text", "feedback", "success", "base"], ["success"]),
+    };
+}
 function Coordination(props) {
     let store;
     try {
@@ -50,26 +75,35 @@ function Sidebar(props) {
     </Show>
   </box>;
 }
-export default {
+export default Plugin.define({
     id: "opencode-herdr.shortcuts",
-    tui: async (api, options) => {
+    setup: async (context) => {
         if (process.env.HERDR_ENV !== "1")
             return;
-        if (options?.configPath !== undefined && (typeof options.configPath !== "string" || !options.configPath)) {
+        const options = context.options;
+        if (options.configPath !== undefined && (typeof options.configPath !== "string" || !options.configPath)) {
             throw new Error("opencode-herdr: configPath must be a non-empty string");
         }
         let shortcuts;
         try {
-            shortcuts = await loadShortcuts(options?.configPath ?? configPath());
+            shortcuts = await loadShortcuts(options.configPath ?? configPath());
         }
         catch {
             // A broken/unreadable config must not present defaults as the user's keys.
         }
-        api.slots.register({ order: 600, slots: {
-                sidebar_content: (_ctx, value) => <box flexDirection="column" gap={1}>
-        <Show when={options?.coordination !== false}><Coordination api={api} sessionID={value.session_id}/></Show>
+        const api = {
+            theme: { current: flatColours(context.theme) },
+            ui: { dialog: {
+                    alert: (input) => void context.ui.dialog.alert(input),
+                    select: async (input) => await context.ui.dialog.select(input),
+                } },
+        };
+        context.ui.slot({
+            append: "sidebar.content",
+            render: ({ sessionID }) => <box flexDirection="column" gap={1}>
+        <Show when={options.coordination !== false}><Coordination api={api} sessionID={sessionID}/></Show>
         <Sidebar api={api} shortcuts={shortcuts}/>
       </box>,
-            } });
+        });
     },
-};
+});

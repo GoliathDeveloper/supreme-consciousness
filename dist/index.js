@@ -91,10 +91,19 @@ export default Plugin.define({
                     return { data };
                 },
                 async promptAsync({ path, body }) {
-                    if (body.agent)
+                    // Assert persona/model only when the session has none. Re-asserting
+                    // on every delivery clobbered mid-flight pane choices and re-applied
+                    // stale ids after a config rename (sessions then pointed at an
+                    // unresolvable model and showed "(unavailable)"). A session that
+                    // already chose keeps its choice — including an unresolvable one,
+                    // which must fail visibly rather than be silently "fixed".
+                    const session = await ctx.session.get({ sessionID: path.id });
+                    const blank = (v) => v === undefined || v === null || (typeof v === "string" && !v.trim());
+                    if (body.agent && blank(session.agent))
                         await ctx.session.switchAgent({ sessionID: path.id, agent: body.agent });
-                    if (body.model)
+                    if (body.model && blank(session.model?.providerID) && blank(session.model?.id)) {
                         await ctx.session.switchModel({ sessionID: path.id, model: { providerID: body.model.providerID, id: body.model.modelID, ...(body.variant !== undefined ? { variant: body.variant } : {}) } });
+                    }
                     const text = body.parts.filter(part => part?.type === "text" && typeof part.text === "string").map(part => part.text).join("\n");
                     await ctx.session.prompt({ sessionID: path.id, id: body.messageID, text });
                     return { response: { status: 200 } };
