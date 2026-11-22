@@ -135,16 +135,47 @@ async function agentList() {
   const sessionPanes = new Map();
   for (const term of terms.filter(isAgentPane)) {
     const candidates = term.directory ? (byDirectory.get(term.directory) ?? []) : [];
-    const running = candidates.filter(s => active[s.id]?.type === 'running');
-    const picked = (running.length ? running : candidates).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    if (!candidates.length) continue;
+    const title = term.detail?.status?.title;
+    let picked;
+    if (title) {
+      picked = candidates.find(s => (s.title ?? '') === title);
+      if (!picked) continue;
+    } else if (candidates.length === 1) {
+      picked = candidates[0];
+    } else {
+      const running = candidates.filter(s => active[s.id]?.type === 'running');
+      picked = running[0] ?? [...candidates].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    }
     if (picked) sessionPanes.set(picked.id, (sessionPanes.get(picked.id) ?? 0) + 1);
   }
   const agents = [];
   for (const term of terms.filter(isAgentPane)) {
     const candidates = term.directory ? (byDirectory.get(term.directory) ?? []) : [];
     if (!candidates.length) continue;
+    // Binding precedence: the TUI's transient 7501 title is authoritative
+    // while a turn runs (it names the displayed session). Outside activity,
+    // a single-session directory binds unambiguously; multiple candidates
+    // are a guess — flagged so the mod can warn instead of guessing silently.
+    // After /new the orphaned old session wins recency on its own (deliveries
+    // bump it), so a flagged pane needs a first message (or orphan removal)
+    // before deliveries make sense again.
+    const title = term.detail?.status?.title;
     const running = candidates.filter(s => active[s.id]?.type === 'running');
-    const picked = (running.length ? running : candidates).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    let picked, ambiguous;
+    if (title) {
+      const byTitle = candidates.filter(s => (s.title ?? '') === title);
+      if (!byTitle.length) continue;
+      picked = byTitle[0];
+    } else if (candidates.length === 1) {
+      picked = candidates[0];
+    } else {
+      picked = running[0] ?? [...candidates].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      // Actionable ambiguity counts only recently-active sessions: a directory
+      // with ten day-old test sessions is history, not a live guess.
+      const horizon = Date.now() - 6 * 3600_000;
+      ambiguous = candidates.filter(s => (s.updatedAt ?? 0) > horizon).length;
+    }
     const panes = sessionPanes.get(picked.id) ?? 1;
     // Prefer the TUI's own OSC 7501 state; the server-side execution map
     // catches turns the TUI has not rendered yet (delivery-worker prompts).
@@ -161,6 +192,7 @@ async function agentList() {
       agent_status,
       name: term.tab.name ?? term.entry.name ?? picked.title ?? picked.id,
       ...(panes > 1 ? { conflict: panes } : {}),
+      ...(ambiguous > 1 ? { ambiguous } : {}),
       agent_session: { agent: 'opencode', kind: 'id', value: picked.id },
     });
   }
