@@ -418,7 +418,7 @@ async function review(limit = 20) {
   let agents = [];
   const transitions = {};
   if (ids) {
-    try { agents = await sqliteJson('SELECT id, label, sessionId FROM agents'); } catch {}
+    try { agents = await sqliteJson('SELECT id, label, nickname, sessionId FROM agents'); } catch {}
     try {
       for (const row of await sqliteJson(`SELECT entityId, transition, sessionId, createdAt FROM audit_events WHERE entityId IN (${ids}) ORDER BY id`)) {
         (transitions[row.entityId] ??= []).push({ at: row.createdAt, transition: row.transition, session: row.sessionId, actor: null });
@@ -428,7 +428,7 @@ async function review(limit = 20) {
   const labelOf = (agentId) => {
     if (String(agentId).startsWith('remote:')) return 'remote peer';
     const agent = agents.find(a => a.id === agentId || a.sessionId === agentId);
-    return agent?.label ?? String(agentId).slice(0, 12);
+    return agent?.nickname || agent?.label || String(agentId).slice(0, 12);
   };
   const feed = [];
   for (const entry of requests) {

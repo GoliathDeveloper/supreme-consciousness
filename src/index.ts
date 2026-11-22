@@ -374,6 +374,16 @@ export default Plugin.define({
         },
       }));
       editor.add(tool({
+        name: "set_nickname",
+        description: "Set or change the human-readable nickname of an agent. All subsequent label references (UI, review feed, list_agents) use this nickname instead of the default pane name.",
+        input: { type: "object", properties: { agentId: text, name: text }, required: ["agentId", "name"], additionalProperties: false },
+        async execute(input: { agentId: string; name: string }, context: ExecuteContext) {
+          await caller(context.sessionID);
+          store.updateAgentNickname(input.agentId, input.name);
+          return { content: json({ ok: true, agentId: input.agentId, nickname: input.name }) };
+        },
+      }));
+      editor.add(tool({
         name: "open_agent",
         description: "Provision an agent without assigning a task. Explicitly choose managed or independent. Returns a recoverable operation; inspect readiness before requesting work. Never auto-approves permissions or copies secrets.",
         input: { type: "object", properties: { persona: text, folder: text, placement: enumerable("pane", "subworkspace", "workspace"), management: enumerable("managed", "independent"), isolation: { type: "object", properties: { branch: text, baseCommit: text }, required: ["branch"], additionalProperties: false }, idempotencyKey: text }, required: ["persona", "folder", "placement", "management", "idempotencyKey"], additionalProperties: false },

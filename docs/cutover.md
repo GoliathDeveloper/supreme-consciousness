@@ -52,7 +52,7 @@ Envoy session must not be removed underneath its own tools. A restart is require
 | Discover peers | `list_agents`, optionally `peerId` |
 | Delegate/create peer | `open_agent`, inspect `list_operations`, then `request_agent` |
 | Existing-agent request | `request_agent` with explicit kind and idempotency key |
-| Read/handback | `read_task` with delivery ID, then `hand_back` for tasks |
+| Read/handback | `accept_delivery` with delivery ID, then `hand_back` for tasks |
 | Pause/resume | Hand back `paused`, then `resume_request` with current generation |
 | Ask/reply | `ask_coordinator`, `reply_question`, `inspect_request` |
 | Cancel | `cancel_request`, with possible continued execution explicitly reported |

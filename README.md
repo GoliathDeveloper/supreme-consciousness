@@ -54,9 +54,9 @@ sequenceDiagram
         WB->>WB: is my agent idle? (herdr shim → pane + running-session map)
     end
     WB->>DB: attempt → delivery: unknown (messageId minted)
-    WB->>R: user prompt: "Call read_task requestId=… generation=1 deliveryId=…"
+    WB->>R: user prompt: "Call accept_delivery requestId=… generation=1 deliveryId=…"
     WB->>R: read the message back → exact text + id verified → delivery: submitted
-    R->>DB: read_task (re-verifies the receipt) → delivery: accepted
+    R->>DB: accept_delivery (re-verifies the receipt) → delivery: accepted
     Note over R: does the work — advisory: report only · code_change: scoped edits
     R->>DB: hand_back → immutable result row (completed | paused | failed)
     DB-->>WA: notice scheduled for the sender
@@ -68,7 +68,7 @@ sequenceDiagram
 agent and model (Herdr inventory + OpenCode's session record), switches the
 recipient session to them, and calls `ctx.session.prompt` with a deterministic
 `messageID` and the prompt text `requestPrompt(request)`. The prompt tells the
-recipient model exactly which tool to call: *"Call read_task with requestId=…,
+recipient model exactly which tool to call: *"Call accept_delivery with requestId=…,
 generation=…, deliveryId=…"*. The recipient never receives anything outside its own
 normal conversation — a task arrives as a user message, and its model acts on it.
 
@@ -81,7 +81,7 @@ the worker reads that exact message back from the recipient's session (same
 | `queued` | waiting; recipient must be idle before dispatch |
 | `unknown` | prompt attempted, receipt not yet proven (worker crashed mid-flight, or still verifying) |
 | `submitted` | receipt verified in the recipient's session |
-| `accepted` | the recipient called `read_task` |
+| `accepted` | the recipient called `accept_delivery` |
 | `cancelled` | sender cancelled before submission |
 
 `unknown` is deliberately never silently re-sent (a resend could double-deliver):
@@ -141,14 +141,14 @@ Registered in `opencode.jsonc` as a package directory:
 }
 ```
 
-The V2 server part (`Plugin.define`) registers 13 tools and a `/herdr` command:
+The V2 server part (`Plugin.define`) registers 15 tools and a `/herdr` command:
 
 | Tool | Purpose |
 | --- | --- |
 | `list_agents` | Exact local agent identities, or a remote peer's. Discovery grants no authority. |
 | `list_machines` | This machine's coordination identity + configured SSH peers. |
 | `request_agent` | Queue a task or instruction for an exact agent. Idempotent by key. |
-| `read_task` | Accept and read an exact delivery (requestId + generation + deliveryId). |
+| `accept_delivery` | Accept and read an exact delivery (requestId + generation + deliveryId). |
 | `hand_back` | Publish an immutable result for an accepted task generation. |
 | `inspect_request` | Authorised history: generations, deliveries, results, questions, audit. |
 | `list_requests` | This conversation's inbox and outbox. |
@@ -157,6 +157,7 @@ The V2 server part (`Plugin.define`) registers 13 tools and a `/herdr` command:
 | `ask_coordinator` / `reply_question` | Correlated questions on an accepted task, answered by its owner. |
 | `open_agent` / `close_agent` | Provisioning (pane/worktree/workspace, managed or independent). Closure requires a trusted owner grant. |
 | `list_operations` | Inspect persisted provisioning/closing/remote operations; reconciles uncertainty. |
+| `set_nickname` | Set the human-readable nickname of an agent; labels (review feed, history) prefer it over the pane-derived name. |
 
 ### 2. The SQLite store (`src/store.ts`)
 
@@ -254,7 +255,7 @@ Run OpenCode in two Herdr panes, then:
 2. `request_agent` — queue a task (`hand_back` required) or an instruction
    (acknowledgement only) with an idempotency key
 3. The recipient's pane receives the prompt automatically when idle (the delivery
-   worker), shows `in` tokens in the sidebar, and calls `read_task` to accept
+   worker), shows `in` tokens in the sidebar, and calls `accept_delivery` to accept
 4. `hand_back` — the recipient publishes an immutable result; the sender's `out`
    tokens update, and `wait` decrements
 5. `ask_coordinator` / `reply_question` for mid-task questions;

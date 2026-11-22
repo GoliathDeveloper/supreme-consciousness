@@ -7,6 +7,7 @@ export type Agent = {
   terminalId: string
   workspaceId: string
   directory: string
+  nickname?: string
   label: string
   state: string
   lastSeen: number

@@ -10,7 +10,7 @@ import type { Agent, Delivery, History, Notice, Operation, Outcome, Question, Re
 // Node resolves the built-in node:sqlite through the equivalent adapter.
 type Value = string | number | null
 type Row = Record<string, unknown>
-type AgentInput = Omit<Agent, 'id' | 'machineId' | 'management'> & { management?: Agent['management']; managerSessionId?: string }
+type AgentInput = Omit<Agent, 'id' | 'machineId' | 'management' | 'nickname'> & { management?: Agent['management']; managerSessionId?: string; nickname?: string }
 interface SQLite {
   exec(sql: string): void
   query(sql: string): {
@@ -110,8 +110,8 @@ CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
 CREATE TABLE agents (
   id TEXT PRIMARY KEY, machineId TEXT NOT NULL, sessionId TEXT NOT NULL UNIQUE,
   socket TEXT NOT NULL, paneId TEXT NOT NULL, terminalId TEXT NOT NULL,
-  workspaceId TEXT NOT NULL, directory TEXT NOT NULL, label TEXT NOT NULL,
-  state TEXT NOT NULL, lastSeen INTEGER NOT NULL CHECK(lastSeen >= 0),
+  workspaceId TEXT NOT NULL, directory TEXT NOT NULL, nickname TEXT NOT NULL DEFAULT '',
+  label TEXT NOT NULL, state TEXT NOT NULL, lastSeen INTEGER NOT NULL CHECK(lastSeen >= 0),
   management TEXT NOT NULL CHECK(management IN ('managed','independent')),
   managerSessionId TEXT,
   CHECK((management = 'managed' AND managerSessionId IS NOT NULL) OR
@@ -312,6 +312,12 @@ export class Store {
               SELECT RAISE(ABORT, 'Results are immutable'); END;
             PRAGMA user_version = 2;`)
         }
+        if (version >= 2) {
+          const cols = this.all('PRAGMA table_info(agents)')
+          if (!cols.some(c => c.name === 'nickname')) {
+            this.db.exec("ALTER TABLE agents ADD COLUMN nickname TEXT NOT NULL DEFAULT ''")
+          }
+        }
       })
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;')
       if (path !== ':memory:') {
@@ -342,6 +348,16 @@ export class Store {
 
   observeAgent(input: AgentInput): Agent { return this.saveAgent(input) }
 
+  updateAgentNickname(agentId: string, nickname: string): void {
+    text(agentId, 'agent ID')
+    text(nickname, 'nickname')
+    this.atomic(() => {
+      this.readAgent(this.one('SELECT * FROM agents WHERE id=?', agentId))
+      this.run('UPDATE agents SET nickname=? WHERE id=?', nickname, agentId)
+      this.audit(agentId, `nickname:${nickname}`, this.machineId)
+    })
+  }
+
   private saveAgent(input: AgentInput, provision = false): Agent {
     for (const key of ['sessionId', 'socket', 'paneId', 'terminalId', 'workspaceId', 'state'] as const) text(input[key], key)
     if (typeof input.label !== 'string') throw new Error('Invalid label')
@@ -360,11 +376,16 @@ export class Store {
         if (!provision || previous.management !== 'independent' || management !== 'managed') throw new Error('Observation cannot change agent management')
       }
       const id = previous?.id ?? createHash('sha256').update(`${this.machineId}\0${input.sessionId}`).digest('hex')
-      this.run(`INSERT INTO agents VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(sessionId) DO UPDATE SET label=excluded.label, state=excluded.state,
+      // Explicit column names: a migrated DB has nickname appended last
+      // (ALTER TABLE), so positional VALUES would bind to the wrong columns.
+      this.run(`INSERT INTO agents (id, machineId, sessionId, socket, paneId, terminalId, workspaceId, directory, nickname, label, state, lastSeen, management, managerSessionId)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(sessionId) DO UPDATE SET
+          nickname=CASE WHEN excluded.nickname<>'' THEN excluded.nickname ELSE agents.nickname END,
+          label=excluded.label, state=excluded.state,
           lastSeen=excluded.lastSeen, management=excluded.management, managerSessionId=excluded.managerSessionId`,
-      id, this.machineId, input.sessionId, input.socket, input.paneId, input.terminalId, input.workspaceId,
-      input.directory, input.label, input.state, input.lastSeen, management, manager)
+      id, this.machineId, input.sessionId, input.socket, input.paneId, input.terminalId, input.workspaceId, input.directory,
+      input.nickname ?? '', input.label, input.state, input.lastSeen, management, manager)
       return this.agent(id)
     })
   }
@@ -410,6 +431,10 @@ export class Store {
       workspaceId: text(r.workspaceId, 'workspace ID'), directory: directory(r.directory),
       label: typeof r.label === 'string' ? r.label : text(r.label, 'label'), state: text(r.state, 'agent state'),
       lastSeen: number(r.lastSeen, 'lastSeen'), management: choice(r.management, ['managed', 'independent'], 'management'),
+    }
+    if (r.nickname && typeof r.nickname === 'string' && r.nickname.length > 0) {
+      result.nickname = r.nickname
+      result.label = r.nickname
     }
     if (r.managerSessionId !== null) result.managerSessionId = text(r.managerSessionId, 'managerSessionId')
     if ((result.management === 'managed') !== (result.managerSessionId !== undefined)) throw new Error('Corrupt management binding')

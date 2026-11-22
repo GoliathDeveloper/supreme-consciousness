@@ -49,9 +49,9 @@ export default async function ({ directory }) {
           try {
             result.tools = Object.keys(hooks.tool).sort();
             assert.deepEqual(result.tools, [
-              "ask_coordinator", "cancel_request", "close_agent", "hand_back", "inspect_request",
-              "list_agents", "list_machines", "list_operations", "list_requests", "open_agent",
-              "read_task", "reply_question", "request_agent", "resume_request",
+              "accept_delivery", "ask_coordinator", "cancel_request", "close_agent", "hand_back",
+              "inspect_request", "list_agents", "list_machines", "list_operations", "list_requests",
+              "open_agent", "reply_question", "request_agent", "resume_request", "set_nickname",
             ]);
             for (const tool of Object.values(hooks.tool)) {
               assert.equal(typeof tool.execute, "function");
