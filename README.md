@@ -297,7 +297,7 @@ npm run typecheck            # tsc, strict
 npm run test                 # node --test test/*.test.mjs (shortcut/TUI contracts)
 npm run test:coordination    # bun --conditions=browser: store, delivery, provision,
                              # remote, mailbox, workflows — the full behavioural spec
-npm run test:sqlite-host     # bun:sqlite inside real OpenCode plugin processes
+npm run test:tui             # bun: the V2 TUI plugin components (mailbox, sidebar)
 node test/node-driver-smoke.mjs  # the same Store code under plain Node (node:sqlite adapter)
 ```
 
@@ -306,6 +306,13 @@ machines, audit rollback under injected SQLite failures, claim exclusivity, clos
 reservations, remote cache/snapshot validation and notice lifecycle are all
 covered. Test fixtures resolve tmpdir through `realpathSync` (macOS `/var/folders`
 is a symlink chain; production code checks paths the way real project folders arrive).
+
+**Known fixture debt:** `test:server-host` and `test:sqlite-host` spawn a real
+OpenCode process with plugin fixtures written against the **V1 plugin API** —
+which OpenCode 2.3.2 intentionally no longer loads (the plugin API is the one
+breaking change in the V1→V2 migration). The fixtures need the same `Plugin.define`
+port `src/index.ts` received; until then these two suites fail at plugin load, not
+at the coordination code. Everything else in the suite is green.
 
 ## Known limitations
 

@@ -1,5 +1,5 @@
 #!/usr/local/bin/node
-// herdr — compatibility shim for the opencode-herdr plugin.
+// herdr — compatibility shim for the supreme-consciousness plugin.
 //
 // The plugin targets the Herdr TUI generation (`herdr agent list`, `herdr pane …`).
 // This machine runs the newer herdr-app / herdr-core (`hc`) generation, so this
@@ -7,7 +7,7 @@
 //   - layout and panes:        `herdr-app ls` / `herdr-app do pane.*`
 //   - terminals:               `hc get` / `hc send`
 //   - OpenCode session identity + running state: the local OpenCode HTTP API
-//   - sidebar metadata:        written as JSON for the opencode-herdr GUI mod
+//   - sidebar metadata:        written as JSON for the supreme-consciousness GUI mod
 //
 // It never changes coordination state; the plugin's Store remains the source of
 // truth and the GUI stays a presentation and interaction layer.
@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
-const METADATA_DIR = join(process.env.XDG_STATE_HOME || join(homedir(), '.local/state'), 'opencode-herdr', 'metadata');
+const METADATA_DIR = join(process.env.XDG_STATE_HOME || join(homedir(), '.local/state'), 'supreme-consciousness', 'metadata');
 // Resolve against PATH first, then the usual install locations, so the shim
 // works from launch daemons and mod exec environments with a minimal PATH.
 const candidates = {
@@ -127,7 +127,7 @@ async function opencodeSessions() {
 // written only on authoritative signals (the TUI's 7501 title, the pane's own
 // running turn, an unambiguous directory); a recency guess is flagged in the
 // inventory and never memorised.
-const BINDINGS_FILE = () => join(homedir(), '.local/state/opencode-herdr/shim-bindings.json');
+const BINDINGS_FILE = () => join(homedir(), '.local/state/supreme-consciousness/shim-bindings.json');
 
 function loadBindings() {
   try { return JSON.parse(readFileSync(BINDINGS_FILE(), 'utf8')); } catch { return {}; }
@@ -326,12 +326,13 @@ async function paneRun(paneId, command) {
 
 // ——— herdr pane report-metadata —————————————————————————————————————————————
 // Sidebar tokens are display-only. The TUI generation consumed them natively;
-// here they are written for the opencode-herdr GUI mod to render.
+// here they are written for the supreme-consciousness GUI mod to render.
 
-async function reportMetadata(paneId, tokens) {
+async function reportMetadata(paneId, tokens, pluginRoot) {
   mkdirSync(METADATA_DIR, { recursive: true, mode: 0o700 });
   writeFileSync(join(METADATA_DIR, `${paneId}.json`), json({
-    paneId, source: 'opencode-herdr', agent: 'opencode', tokens, updatedAt: Date.now(),
+    paneId, source: 'supreme-consciousness', agent: 'opencode', tokens, updatedAt: Date.now(),
+    ...(pluginRoot ? { pluginRoot } : {}),
   }), { mode: 0o600 });
   return { result: {} };
 }
@@ -390,7 +391,7 @@ async function sessionOrphans() {
 // asked the other to do, the outcome, and the lifecycle transitions. The store
 // remains the source of truth; this only projects it for people.
 
-const reviewDb = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'opencode', 'opencode-herdr', 'coordination.sqlite');
+const reviewDb = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'opencode', 'supreme-consciousness', 'coordination.sqlite');
 
 async function sqliteJson(sql) {
   const { stdout } = await execFirst(['sqlite3', '/usr/bin/sqlite3', '/opt/homebrew/bin/sqlite3'], ['-readonly', '-json', reviewDb(), sql], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024 });
@@ -491,7 +492,7 @@ try {
         if (target === 'list') return out(await paneList(flags.workspace));
         if (target === 'close') return out(await paneClose(positional[1]));
         if (target === 'run') return out(await paneRun(positional[1], positional[2]));
-        if (target === 'report-metadata') return out(await reportMetadata(positional[1], flags.tokens ?? {}));
+        if (target === 'report-metadata') return out(await reportMetadata(positional[1], flags.tokens ?? {}, flags['plugin-root']));
         if (target === 'of-terminal') return out(await paneOfTerminal(positional[1]));
         fail(`Unknown pane command: ${target ?? '(missing)'}`);
         break;

@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const main = fileURLToPath(new URL("../dist/index.js", import.meta.url));
 const probe = fileURLToPath(new URL("./fixtures/server-host-check.mjs", import.meta.url));
 await access(main); // Run npm run build first. Never fall back to source imports.
-const root = await mkdtemp("/tmp/opencode/herdr-server-host-");
+const root = await mkdtemp(join(tmpdir(), "herdr-server-host-"));
 const children = new Map();
 
 async function launch(mode) {
@@ -43,6 +44,14 @@ async function launch(mode) {
     SERVER_HOST_PROBE_MODE: mode,
     SERVER_HOST_PROBE_REPORT: join(home, "report.json"),
   });
+  // The spawned CLI starts its own managed service; give it a private port so
+  // it never collides with the user's running shared service.
+  const port = 40000 + Math.floor(Math.random() * 20000);
+  await new Promise((resolve, reject) => {
+    const setPort = spawn("opencode", ["service", "set", "port", String(port)], { cwd: home, env, stdio: "ignore" });
+    setPort.on("error", reject);
+    setPort.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`service set port failed (${code})`))));
+  });
   const child = spawn("opencode", ["debug", "config"], {
     cwd: home, env, stdio: ["ignore", "pipe", "pipe"],
   });
@@ -67,7 +76,7 @@ async function launch(mode) {
         assert.equal(report.error, undefined, `${mode} probe failed: ${report.error}\n${output}`);
         assert.equal(report.mode, mode);
         assert.equal(report.databaseExists, true);
-        assert.equal(report.schemaVersion, 1);
+        assert.equal(report.schemaVersion, 2);
         assert.equal(report.commandRegistered, mode === "normal");
         assert.equal(report.counts.requests, 0);
         if (mode === "conflict") assert.equal(report.disabled, true);

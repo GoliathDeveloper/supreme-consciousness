@@ -12,7 +12,7 @@ try {
     ? require_('bun:sqlite')
     : require_('node:sqlite');
   const Database = dbModule.Database ?? dbModule.DatabaseSync;
-  const db = new Database('/Users/phil/.config/opencode/opencode-herdr/coordination.sqlite', { readOnly: true });
+  const db = new Database('/Users/phil/.config/opencode/supreme-consciousness/coordination.sqlite', { readOnly: true });
   const all = (sql) => db.prepare(sql).all();
   const labels = Object.fromEntries(all('SELECT id, label, sessionId FROM agents')
     .flatMap(a => [[a.id, a.label], [a.sessionId, a.label]]));

@@ -36,7 +36,7 @@ if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requ
   const require_ = createRequire(import.meta.url);
   const dbModule = typeof globalThis.Bun !== 'undefined' ? require_('bun:sqlite') : require_('node:sqlite');
   const Database = dbModule.Database ?? dbModule.DatabaseSync;
-  const db = new Database('/Users/phil/.config/opencode/opencode-herdr/coordination.sqlite', { readOnly: true });
+  const db = new Database('/Users/phil/.config/opencode/supreme-consciousness/coordination.sqlite', { readOnly: true });
   const rows = db.prepare('SELECT id FROM requests WHERE id LIKE ?').all(`${requestId}%`);
   db.close();
   if (rows.length !== 1) {

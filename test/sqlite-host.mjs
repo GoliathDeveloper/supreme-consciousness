@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, readFile, access, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-const root = await mkdtemp("/tmp/opencode/herdr-sqlite-host-");
+const root = await mkdtemp(join(tmpdir(), "herdr-sqlite-host-"));
 const children = new Set();
 const fixture = fileURLToPath(new URL("./fixtures/sqlite-host-plugin.mjs", import.meta.url));
 const database = join(root, "coordination.sqlite");
@@ -34,6 +35,14 @@ async function launch(mode, name = mode) {
     SQLITE_PROBE_REPORT: join(home, "report.json"),
     SQLITE_PROBE_MODE: mode,
     SQLITE_PROBE_GATE: gate,
+  });
+  // Private service port for the spawned CLI — never collide with the user's
+  // running shared service (see server-host.mjs for the full rationale).
+  const port = 40000 + Math.floor(Math.random() * 20000);
+  await new Promise((resolve, reject) => {
+    const setPort = spawn("opencode", ["service", "set", "port", String(port)], { cwd: home, env, stdio: "ignore" });
+    setPort.on("error", reject);
+    setPort.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`service set port failed (${code})`))));
   });
   const child = spawn("opencode", ["debug", "config"], { cwd: home, env, stdio: ["ignore", "pipe", "pipe"] });
   children.add(child);

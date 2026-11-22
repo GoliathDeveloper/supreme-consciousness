@@ -25,7 +25,7 @@ import { Store } from '../dist/store.js';
 
 const run = promisify(execFile);
 const shim = process.env.HERDR_SHIM || `${process.env.HOME}/.local/bin/herdr`;
-const DB = `${process.env.HOME}/.config/opencode/opencode-herdr/coordination.sqlite`;
+const DB = `${process.env.HOME}/.config/opencode/supreme-consciousness/coordination.sqlite`;
 const PENDING = new Set(['queued', 'unknown', 'submitted', 'accepted']);
 
 const flags = { from: 'Herdr-A2A', flat: false, dry: false, force: false };

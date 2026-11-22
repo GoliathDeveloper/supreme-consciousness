@@ -21,7 +21,7 @@ export default async function ({ directory }) {
         }
 
         // Check loader-created state before a direct instance could mask a load failure.
-        const path = join(process.env.XDG_CONFIG_HOME, "opencode", "opencode-herdr", "coordination.sqlite");
+        const path = join(process.env.XDG_CONFIG_HOME, "opencode", "supreme-consciousness", "coordination.sqlite");
         await access(path);
         const db = new Database(path, { readonly: true });
         try {
@@ -30,7 +30,7 @@ export default async function ({ directory }) {
           const counts = Object.fromEntries(tables.map((table) => [table, db.query(`SELECT count(*) AS n FROM "${table}"`).get().n]));
           for (const table of tables) if (table !== "metadata") assert.equal(counts[table], 0, `${table} must be empty`);
           const schemaVersion = db.query("PRAGMA user_version").get().user_version;
-          assert.equal(schemaVersion, 1);
+          assert.equal(schemaVersion, 2);
           result = {
             mode, pid: process.pid, bun: Bun.version,
             sqlite: db.query("SELECT sqlite_version() AS version").get().version,

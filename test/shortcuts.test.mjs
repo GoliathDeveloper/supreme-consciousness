@@ -60,7 +60,7 @@ test("config location respects explicit path and XDG config directory", () => {
 });
 
 test("load uses defaults only for a missing file", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "opencode-herdr-"));
+  const dir = await mkdtemp(join(tmpdir(), "supreme-consciousness-"));
   try {
     const path = join(dir, "config.toml");
     assert.equal((await loadShortcuts(path)).prefix, "ctrl+b");
