@@ -164,6 +164,12 @@ export default class CoordinationPanel extends View {
     const active = busy || Boolean(work);
     const conflict = Number(agent.conflict ?? 0) > 1;
     const ambiguous = Number(agent.ambiguous ?? 0) > 1;
+    // Two status sources, shown when they disagree: the merged truth (TUI
+    // signal + server execution map) and the TUI's own 7501 signal, which
+    // stays idle for server-initiated turns — Herdr's native list reads only
+    // that signal, which is why the two UIs disagree during coordination.
+    const tuiIdle = agent.agent_status === "working" && agent.tui_status && agent.tui_status !== "working";
+    const statusText = tuiIdle ? `working · tui reports ${agent.tui_status}` : work && !busy ? "coordination" : agent.agent_status ?? "unknown";
     const workLine = work
       ? div().text_color(t.working).child(clip(`↳ ${work.state === "accepted" ? "owed handback" : work.state}: ${work.brief}`, 120))
       : null;
@@ -178,7 +184,7 @@ export default class CoordinationPanel extends View {
       .child(h_flex().gap(6).items_center()
         .child(div().size(7).rounded(4).flex_none().bg(active ? t.working : t.idle))
         .child(div().flex_1().text_color(t.foreground).child(short(agent.name || agent.cwd || pane)))
-        .child(div().text_color(active ? t.working : t.dim).child(work && !busy ? "coordination" : agent.agent_status ?? "unknown")))
+        .child(div().text_color(active ? t.working : t.dim).child(statusText)))
       .when(Boolean(conflictLine), el => el.child(conflictLine))
       .when(Boolean(ambiguousLine), el => el.child(ambiguousLine))
       .when(Boolean(workLine), el => el.child(workLine))

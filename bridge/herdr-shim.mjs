@@ -218,6 +218,11 @@ async function agentList() {
       cwd: term.directory,
       agent: 'opencode',
       agent_status,
+      // The TUI's own OSC 7501 signal, reported separately so the mod can show
+      // both truths: server-initiated turns (deliveries, nudges) run without
+      // the TUI's status ever painting "working" — Herdr's native list reads
+      // only this signal and goes blind exactly when coordination is active.
+      tui_status: tuiState ?? null,
       name: term.tab.name ?? term.entry.name ?? picked.title ?? picked.id,
       ...(panes > 1 ? { conflict: panes } : {}),
       ...(ambiguous > 1 ? { ambiguous } : {}),
