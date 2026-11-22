@@ -113,21 +113,28 @@ agent queue. Intermediate holds queue and dispatch in order.
 
 ## The hello test (all agents greet each other)
 
-A round-robin greeting across **every live OpenCode pane**: origin greets the
-first agent, who greets the next, … and the last greeting lands back on the
-origin, closing the circle. Each participant receives exactly one hello.
+Two modes. **Flat (default)** — the origin enqueues one short, independent
+greeting per other agent; each brief is two sentences (`read_task` to accept,
+`hand_back` to acknowledge), with no verbatim copying, so any agent that can
+accept and acknowledge can complete. **Relay (`--relay`)** — the true
+agent-to-agent cascade: leg 1 is enqueued and each agent relays the next
+greeting itself (nested briefs, byte-exact copying required). The relay mode
+demands capable models — the integrity guard brands handbacks that claim a
+relay that never fired, and small models deterministically take that
+shortcut (seven consecutive catches on one pane).
 
 ```sh
-node scripts/hello-test.mjs                # seed the round from "Herdr-A2A"
+node scripts/hello-test.mjs                # flat: reliable on any panes
+node scripts/hello-test.mjs --relay        # the cascade: capable models only
 node scripts/hello-test.mjs --dry          # print the leg briefs only
 ```
 
 The Coordination panel's **Hello test** section does this with one click —
 **▶ say hello** runs the script (the mod itself never mutates the store) and
 then watches the round live: each leg appears with its state
-(`queued → submitted → accepted → completed`), the greeter's handback summary,
-and a verdict line (`leg 2/4 in flight`, `all 4 agents greeted each other ✓`,
-or a blocked note naming the leg to cancel).
+(`queued → submitted → accepted → completed`), the acknowledgment summaries,
+and a verdict line (`leg 2/3 in flight`, `all 3 agents greeted ✓`, or a
+blocked/rejected note).
 
 Design notes:
 
@@ -135,9 +142,11 @@ Design notes:
   click starts a **new** round.
 - The script **refuses to start** while a previous round still has legs in
   flight (the one-pending-per-agent queue would muddle both runs). It names
-  the blocking legs and the cancel command; `--force` overrides.
-- Legs are compact by design (~300–500 characters) so 1.7B-class local models
-  can copy them verbatim — a gentler relay test than the 4/6-hop chains.
+  the blocking legs and the cancel command; `--force` overrides. The
+  **✕ cancel** button clears them in one click.
+- Flat briefs are two sentences by design — a relay that demands verbatim
+  copying of nested briefs is the hardest ask for a small model, and the
+  easiest to fake (the closing summary is right there in the text).
 
 **Model requirements.** Each intermediate agent must copy the next leg's text
 verbatim — nested briefs grow with hop count (~600 characters for a 4-hop,

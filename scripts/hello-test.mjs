@@ -1,16 +1,21 @@
 #!/usr/bin/env node
-// hello-test — every live OpenCode pane greets every other once, round-robin,
-// and the circle closes when the last greeting arrives back at the origin.
-// Only leg 1 is enqueued here; each leg's brief carries the next greeting, so
-// the agents pass it along themselves:
+// hello-test — every live OpenCode pane gets greeted, and every greeting is
+// acknowledged by handback. The mod's "Hello test" section runs this same
+// script and watches the legs live (requests whose idempotencyKey starts
+// with "hello-").
 //
-//   origin → B → C → … → origin     (each participant receives exactly one hello)
+// Two modes:
+//   flat (default) — the origin enqueues one short greeting per other agent.
+//     Each brief is two sentences: read_task, then hand_back an
+//     acknowledgment. No verbatim copying, so any agent that can accept and
+//     acknowledge can complete — the reliable mode for small local models.
+//   --relay — the true agent-to-agent cascade: leg 1 is enqueued and each
+//     agent relays the next greeting itself (nested briefs, byte-exact
+//     copying required). Demands capable models; the integrity guard brands
+//     handbacks that claim a relay that never fired.
 //
 // Usage:
-//   node scripts/hello-test.mjs [--from "Herdr-A2A"] [--dry] [--force]
-//
-// The mod's "Hello test" section runs this same script and watches the legs
-// live (requests whose idempotencyKey starts with "hello-").
+//   node scripts/hello-test.mjs [--from "Herdr-A2A"] [--relay] [--dry] [--force]
 //
 // Queue safety: one pending request per agent, so a stalled leg blocks that
 // agent. This script refuses to start a new round while hello legs are still
@@ -25,10 +30,11 @@ const shim = process.env.HERDR_SHIM || `${process.env.HOME}/.local/bin/herdr`;
 const DB = `${process.env.HOME}/.config/opencode/opencode-herdr/coordination.sqlite`;
 const PENDING = new Set(['queued', 'unknown', 'submitted', 'accepted']);
 
-const flags = { from: 'Herdr-A2A', dry: false, force: false };
+const flags = { from: 'Herdr-A2A', relay: false, dry: false, force: false };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '--from') flags.from = argv[++i];
+  else if (argv[i] === '--relay') flags.relay = true;
   else if (argv[i] === '--dry') flags.dry = true;
   else if (argv[i] === '--force') flags.force = true;
   else { console.error(`Unexpected argument "${argv[i]}"`); process.exit(1); }
@@ -47,14 +53,6 @@ const origin = resolve(flags.from);
 const others = agents.filter(a => a.agent_session?.value !== origin.agent_session?.value);
 const label = (a) => String(a.name ?? a.cwd ?? a.pane_id).replace(/^OC \| /, '').slice(0, 26);
 
-// Full circle: origin greets each other pane in order; the last hop greets
-// the origin back, closing the loop. With no other agents, origin greets
-// itself — degenerate but still exercises read + handback.
-const route = [...others, origin];
-
-// Refuse while a previous hello round still has legs in flight: the store
-// allows one pending request per agent, so a stalled leg would queue the new
-// round behind it and muddy both runs.
 if (!flags.dry && !flags.force) {
   const { createRequire } = await import('node:module');
   const require_ = createRequire(import.meta.url);
@@ -86,15 +84,52 @@ if (!flags.dry && !flags.force) {
 
 const stamp = Date.now().toString(36).slice(-6);
 const legKey = (n) => `hello-${stamp}-leg${n}`;
-const N = route.length;
-
-const store = new Store();
 const agentId = (sessionId) => createHash('sha256').update(`${store.machineId}\0${sessionId}`).digest('hex');
 
-// Bottom-up brief generation — compact on purpose: short relays are what the
-// smaller local models can copy verbatim. Each leg n is delivered to
-// route[n-1]; its sender is origin for leg 1, route[n-2] afterwards, so the
-// greeting story reads: origin → route[0] → route[1] → … → origin.
+const store = new Store();
+
+if (!flags.relay) {
+  // —— flat mode: one short, independent greeting per other agent ——
+  const M = others.length;
+  if (M === 0) { console.error('No other live agents to greet.'); store.close(); process.exit(1); }
+  const briefs = others.map((hop, index) => ({
+    hop, key: legKey(index + 1),
+    text: `Hello across the mesh — greeting leg ${index + 1}/${M}: ${label(origin)} greets ${label(hop)}! Call read_task (requestId/generation/deliveryId above) to accept it, then hand_back completed with summary 'leg ${index + 1}/${M}: ${label(hop)} acknowledged the hello from ${label(origin)}'.`,
+  }));
+  if (flags.dry) {
+    for (const b of briefs) console.log(`— ${b.key} → ${label(b.hop)} —\n${b.text}\n`);
+    store.close();
+    process.exit(0);
+  }
+  try {
+    const enqueued = briefs.map(b => store.enqueue({
+      originSessionId: origin.agent_session.value,
+      originDirectory: origin.cwd,
+      recipientId: agentId(b.hop.agent_session.value),
+      kind: 'task',
+      text: b.text,
+      executionPolicy: 'advisory',
+      idempotencyKey: b.key,
+    }));
+    console.log(`hello run ${stamp} (flat): ${label(origin)} greets ${others.map(label).join(', ')}`);
+    console.log(`legs: ${M} enqueued · first requestId ${enqueued[0].id} (${enqueued[0].state})`);
+    console.log(`watch: the mod's "Hello test" section, or node scripts/watch-store.mjs`);
+  } finally {
+    store.close();
+  }
+  process.exit(0);
+}
+
+// —— relay mode: the true agent-to-agent cascade ——
+// Full circle: origin greets the first agent, who greets the next, … and the
+// last greeting lands back on the origin. Each leg's brief carries the next
+// verbatim, so the agents pass it along themselves.
+const route = [...others, origin];
+const N = route.length;
+
+// Bottom-up brief generation — each leg n is delivered to route[n-1]; its
+// sender is origin for leg 1, route[n-2] afterwards, so the greeting story
+// reads: origin → route[0] → route[1] → … → origin.
 let brief = null;
 const briefs = new Map();
 const senderOf = (n) => (n === 1 ? origin : route[n - 2]);
@@ -128,7 +163,7 @@ try {
     executionPolicy: 'advisory',
     idempotencyKey: legKey(1),
   });
-  console.log(`hello run ${stamp}: ${[origin, ...route].map(label).join(' → ')}`);
+  console.log(`hello run ${stamp} (relay): ${[origin, ...route].map(label).join(' → ')}`);
   console.log(`legs: ${N} · leg 1 requestId ${request.id} (${request.state})`);
   console.log(`watch: the mod's "Hello test" section, or node scripts/watch-store.mjs`);
 } finally {
