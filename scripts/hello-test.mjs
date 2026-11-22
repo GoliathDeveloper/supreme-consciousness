@@ -63,11 +63,18 @@ if (!flags.dry && !flags.force) {
   let inFlight = [];
   try {
     const db = new Database(DB, { readOnly: true });
-    inFlight = db.prepare(`SELECT r.id, r.idempotencyKey, d.state FROM requests r
-        JOIN deliveries d ON d.requestId = r.id AND d.generation = r.generation
-        WHERE r.idempotencyKey LIKE 'hello-%' AND d.state IN ('queued','unknown','submitted','accepted')
-          AND r.cancelledAt IS NULL`).all();
+    // Effective state mirrors the review projection: a delivery row stays
+    // 'accepted' after handback — completion lives in the results table.
+    const rows = db.prepare(`SELECT r.id, r.idempotencyKey,
+        CASE WHEN r.cancelledAt IS NOT NULL THEN 'cancelled'
+             WHEN t.outcome IS NOT NULL THEN t.outcome
+             ELSE d.state END AS state
+      FROM requests r
+      JOIN deliveries d ON d.requestId = r.id AND d.generation = r.generation
+      LEFT JOIN results t ON t.requestId = r.id AND t.generation = r.generation
+      WHERE r.idempotencyKey LIKE 'hello-%'`).all();
     db.close();
+    inFlight = rows.filter((row) => PENDING.has(row.state));
   } catch {}
   if (inFlight.length) {
     console.error(`Refusing: ${inFlight.length} hello leg(s) still in flight — cancel them first:`);
