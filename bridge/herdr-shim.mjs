@@ -153,9 +153,9 @@ function resolvePaneSession(term, candidates, active, bindings) {
   const running = candidates.filter(s => active[s.id]?.type === 'running');
   const sticky = candidates.find(s => s.id === bindings[term.paneId]);
   let picked, ambiguous;
-  if (title) {
-    picked = candidates.find(s => (s.title ?? '') === title);
-    if (!picked) return { picked: undefined };
+  const titleMatch = title ? candidates.find(s => (s.title ?? '') === title) : undefined;
+  if (titleMatch) {
+    picked = titleMatch;
   } else if (working && running.length === 1) {
     picked = running[0];
   } else {

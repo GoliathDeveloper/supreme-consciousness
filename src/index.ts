@@ -284,8 +284,8 @@ export default Plugin.define({
         },
       }));
       editor.add(tool({
-        name: "read_task",
-        description: "Accept and read the exact request delivery from your prompt. Requires requestId, generation and deliveryId. Preserves existing work. Instruction acceptance does not require handback.",
+        name: "accept_delivery",
+        description: "Accept the exact request delivery from your prompt. Requires requestId, generation and deliveryId. Preserves existing work. Instruction acceptance does not require handback.",
         input: { type: "object", properties: { requestId: text, generation: integer, deliveryId: text }, required: ["requestId", "generation", "deliveryId"], additionalProperties: false },
         async execute(input: { requestId: string; generation: number; deliveryId: string }, context: ExecuteContext) {
           const self = await caller(context.sessionID);
@@ -408,7 +408,7 @@ export default Plugin.define({
         name: "herdr",
         description: "Coordinate Herdr agents",
         execute: async ({ sessionID, prompt, delivery }) => {
-          const guidance = "Use list_agents to discover exact identities. Use open_agent to provision without a task, then request_agent for tasks or instructions. Read delivered requests with read_task and publish task outcomes using hand_back. Inspect uncertain operations instead of retrying external effects. Never infer authority to commit, discard or clean resources.";
+          const guidance = "Use list_agents to discover exact identities. Use open_agent to provision without a task, then request_agent for tasks or instructions. Read delivered requests with accept_delivery and publish task outcomes using hand_back. Inspect uncertain operations instead of retrying external effects. Never infer authority to commit, discard or clean resources.";
           const args = typeof prompt?.text === "string" ? prompt.text.trim() : "";
           await ctx.session.prompt({ sessionID, text: args ? `${guidance}\n\n${args}` : guidance, delivery });
         },

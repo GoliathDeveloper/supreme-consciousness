@@ -9,7 +9,7 @@
 //     leg's request itself (byte-exact nested brief). The integrity guard
 //     brands handbacks that claim a relay that never fired.
 //   --flat — reliability fallback: the origin enqueues one short greeting per
-//     other agent (read_task + hand_back only). This proves transport and
+//     other agent (accept_delivery + hand_back only). This proves transport and
 //     acceptance but NOT agent-calls-agent — use it deliberately.
 //
 // Usage:
@@ -116,10 +116,10 @@ if (!flags.flat) {
     const from = label(senderOf(n));
     if (n === N) {
       brief = N === 1
-        ? `Hello relay leg 1/1. Call read_task (requestId/generation/deliveryId above), then hand_back completed with summary 'hello circle closed by ${label(hop)}'.`
-        : `Hello relay leg ${n}/${N}: ${from} greeted you — the circle is complete! Call read_task (requestId/generation/deliveryId above), then hand_back completed with summary 'leg ${n}/${N}: ${from} greeted ${label(hop)} back — all ${N} agents said hello'.`;
+        ? `Hello relay leg 1/1. Call accept_delivery (requestId/generation/deliveryId above), then hand_back completed with summary 'hello circle closed by ${label(hop)}'.`
+        : `Hello relay leg ${n}/${N}: ${from} greeted you — the circle is complete! Call accept_delivery (requestId/generation/deliveryId above), then hand_back completed with summary 'leg ${n}/${N}: ${from} greeted ${label(hop)} back — all ${N} agents said hello'.`;
     } else {
-      brief = `Hello relay leg ${n}/${N}: ${from} greeted you! Please pass the greeting on to ${label(next)}: Call read_task (requestId/generation/deliveryId above), then request_agent identity "${agentId(next.sessionId)}" kind task key "${legKey(n + 1)}" with EXACTLY this text: ${JSON.stringify(brief)} then hand_back completed with summary 'leg ${n}/${N}: ${label(hop)} greeted ${label(next)}'.`;
+      brief = `Hello relay leg ${n}/${N}: ${from} greeted you! Please pass the greeting on to ${label(next)}: Call accept_delivery (requestId/generation/deliveryId above), then request_agent identity "${agentId(next.sessionId)}" kind task key "${legKey(n + 1)}" with EXACTLY this text: ${JSON.stringify(brief)} then hand_back completed with summary 'leg ${n}/${N}: ${label(hop)} greeted ${label(next)}'.`;
     }
     briefs.set(n, brief);
   }
@@ -157,7 +157,7 @@ const M = others.length;
 if (M === 0) { console.error('No other live agents to greet.'); store.close(); process.exit(1); }
 const briefs = others.map((hop, index) => ({
   hop, key: legKey(index + 1),
-  text: `Hello across the mesh — greeting leg ${index + 1}/${M}: ${label(origin)} greets ${label(hop)}! Call read_task (requestId/generation/deliveryId above) to accept it, then hand_back completed with summary 'leg ${index + 1}/${M}: ${label(hop)} acknowledged the hello from ${label(origin)}'.`,
+  text: `Hello across the mesh — greeting leg ${index + 1}/${M}: ${label(origin)} greets ${label(hop)}! Call accept_delivery (requestId/generation/deliveryId above) to accept it, then hand_back completed with summary 'leg ${index + 1}/${M}: ${label(hop)} acknowledged the hello from ${label(origin)}'.`,
 }));
 if (flags.dry) {
   for (const b of briefs) console.log(`— ${b.key} → ${label(b.hop)} —\n${b.text}\n`);

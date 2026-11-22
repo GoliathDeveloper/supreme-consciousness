@@ -81,7 +81,7 @@ function host(store: Store, name: string) {
     expect(prompt.body).not.toHaveProperty('noReply')
     expect(store.request(request.id)).toMatchObject({ state: 'submitted', messageId: prompt.body.messageID })
     const [, id, generation, deliveryId] = prompt.body.parts[0].text.match(
-      /read_task with requestId="([^"]+)", generation=(\d+), deliveryId="([^"]+)"/,
+      /accept_delivery with requestId="([^"]+)", generation=(\d+), deliveryId="([^"]+)"/,
     )!
     return store.accept(id, Number(generation), deliveryId, agent.sessionId)
   }

@@ -15,7 +15,7 @@ const run = promisify(execFile);
 const IDENTITY_KEYS = ["id", "machineId", "sessionId", "socket", "paneId", "terminalId", "workspaceId", "directory"];
 export const messageId = () => `msg_${(BigInt(Date.now()) * 0x1000n & 0xffffffffffffn).toString(16).padStart(12, "0")}${randomBytes(7).toString("hex")}`;
 export const requestPrompt = (r) => `[supreme-consciousness request ${r.id} generation ${r.generation}] ` +
-    `Call read_task with requestId="${r.id}", generation=${r.generation}, deliveryId="${r.deliveryId}". ` +
+    `Call accept_delivery with requestId="${r.id}", generation=${r.generation}, deliveryId="${r.deliveryId}". ` +
     (r.kind === "instruction" ? "This is an instruction. Reading accepts it. Do not hand back a result." :
         "This is a task alongside your existing work. Call hand_back with the same requestId and generation when finished. " +
             "Do not commit, discard, merge or clean up resources unless separately authorised.");

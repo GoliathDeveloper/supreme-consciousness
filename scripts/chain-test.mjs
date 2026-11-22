@@ -68,9 +68,9 @@ for (let n = route.length; n >= 1; n--) {
   const hop = route[n - 1];
   const next = route[n]; // undefined for the final hop
   if (n === route.length) {
-    brief = `Chain relay hop ${n}/${route.length}. Step 1: call read_task with the exact requestId, generation and deliveryId from the bracketed line above. Step 2: call hand_back for this task with outcome completed and summary 'chain hop ${n} acknowledged by ${label(hop)}'.`;
+    brief = `Chain relay hop ${n}/${route.length}. Step 1: call accept_delivery with the exact requestId, generation and deliveryId from the bracketed line above. Step 2: call hand_back for this task with outcome completed and summary 'chain hop ${n} acknowledged by ${label(hop)}'.`;
   } else {
-    brief = `Chain relay hop ${n}/${route.length}. Step 1: call read_task with the exact requestId, generation and deliveryId from the bracketed line above. Step 2: call request_agent with identity "${agentId(next.agent_session.value)}", kind task, executionPolicy advisory, idempotencyKey "${legKey(n + 1)}", and EXACTLY this text: ${JSON.stringify(brief)} Step 3: poll list_requests until that outgoing request shows completed and note its result summary. Step 4: call hand_back for this task with outcome completed and summary 'hop ${n} (${label(hop)}): ${label(next)} replied: <the summary you received>'.`;
+    brief = `Chain relay hop ${n}/${route.length}. Step 1: call accept_delivery with the exact requestId, generation and deliveryId from the bracketed line above. Step 2: call request_agent with identity "${agentId(next.agent_session.value)}", kind task, executionPolicy advisory, idempotencyKey "${legKey(n + 1)}", and EXACTLY this text: ${JSON.stringify(brief)} Step 3: poll list_requests until that outgoing request shows completed and note its result summary. Step 4: call hand_back for this task with outcome completed and summary 'hop ${n} (${label(hop)}): ${label(next)} replied: <the summary you received>'.`;
   }
   briefs.set(n, brief);
 }
