@@ -12,7 +12,7 @@ const run = promisify(execFile);
 // match it exactly before the worker serves or dispatches to that agent.
 const IDENTITY_KEYS = ["id", "machineId", "sessionId", "socket", "paneId", "terminalId", "workspaceId", "directory"] as const;
 export const messageId = () => `msg_${(BigInt(Date.now()) * 0x1000n & 0xffffffffffffn).toString(16).padStart(12, "0")}${randomBytes(7).toString("hex")}`;
-export const requestPrompt = (r: Request) => `[opencode-herdr request ${r.id} generation ${r.generation}] ` +
+export const requestPrompt = (r: Request) => `[supreme-consciousness request ${r.id} generation ${r.generation}] ` +
   `Call read_task with requestId="${r.id}", generation=${r.generation}, deliveryId="${r.deliveryId}". ` +
   (r.kind === "instruction" ? "This is an instruction. Reading accepts it. Do not hand back a result." :
     "This is a task alongside your existing work. Call hand_back with the same requestId and generation when finished. " +
@@ -149,7 +149,7 @@ export class DeliveryWorker {
     if (Date.now() < this.nextErrorAt) return;
     this.nextErrorAt = Date.now() + 30_000;
     // Transport errors can contain prompts or credentials. Never log their payloads.
-    console.error("opencode-herdr: reconciliation deferred; binding, settings or transport unavailable");
+    console.error("supreme-consciousness: reconciliation deferred; binding, settings or transport unavailable");
   }
   tick(): Promise<void> {
     if (this.stopped) return Promise.resolve();

@@ -253,7 +253,7 @@ for (const placement of ['pane', 'subworkspace'] as const) {
     const f = fixture()
     const op = await f.service.open({ ...f.input, placement, isolation: { branch: 'fresh', baseCommit: 'HEAD' } }, f.ctx)
     expect(op.state).toBe('ready')
-    expect(op.result?.destination).toBe(join(f.root, '.config/opencode/opencode-herdr/worktrees', op.id))
+    expect(op.result?.destination).toBe(join(f.root, '.config/opencode/supreme-consciousness/worktrees', op.id))
     expect(op.result?.baseCommit).toBe('a'.repeat(40))
     expect(f.creates[0].options).toEqual({ query: { directory: op.result!.destination }, body: { title: op.result!.label }, throwOnError: true, signal: f.ctx.abort })
     if (placement === 'pane') {

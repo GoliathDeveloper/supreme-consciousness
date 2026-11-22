@@ -265,7 +265,7 @@ export class Store {
   readonly machineId: string
   private readonly db: SQLite
 
-  constructor(path = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'opencode', 'opencode-herdr', 'coordination.sqlite')) {
+  constructor(path = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'opencode', 'supreme-consciousness', 'coordination.sqlite')) {
     if (path !== ':memory:') {
       path = resolve(path)
       const parent = dirname(path)

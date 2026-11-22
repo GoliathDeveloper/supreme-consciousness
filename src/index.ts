@@ -38,7 +38,7 @@ function tool<A>(definition: { name: string; description: string; input: Record<
 }
 
 export default Plugin.define({
-  id: "opencode-herdr",
+  id: "supreme-consciousness",
   async setup(ctx) {
     const store = new Store();
     const directory = ctx.location.directory;
@@ -145,7 +145,7 @@ export default Plugin.define({
     const provisioner = new Provisioner(store, undefined, process.env, client);
     let peers: RemotePeer[] = [];
     try { peers = readRemoteConfig().peers; } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") { store.close(); throw new Error("Invalid opencode-herdr peers.json; remote configuration must be private and valid"); }
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") { store.close(); throw new Error("Invalid supreme-consciousness peers.json; remote configuration must be private and valid"); }
     }
     const remote = new RemoteTransport(store, peers);
     const origins = new Set<string>();
@@ -181,7 +181,7 @@ export default Plugin.define({
             await remote.sync(peer.id, origin);
           }
         }
-      })().catch(() => console.error("opencode-herdr: operation reconciliation deferred"))
+      })().catch(() => console.error("supreme-consciousness: operation reconciliation deferred"))
         .finally(() => { reconciliation = undefined; });
     };
     const target = async (identity: string) => {
@@ -218,7 +218,7 @@ export default Plugin.define({
     const loaded = await ctx.plugin.list();
     if (loaded.data.some(plugin => /herdr-envoy|envoy-dist/.test(JSON.stringify(plugin)))) {
       store.close();
-      throw new Error("Retire or disable the Envoy server plugin before enabling opencode-herdr coordination. Two queue implementations must not share these tools.");
+      throw new Error("Retire or disable the Envoy server plugin before enabling supreme-consciousness coordination. Two queue implementations must not share these tools.");
     }
     configured = true;
 

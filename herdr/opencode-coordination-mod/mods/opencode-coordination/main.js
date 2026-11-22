@@ -1,7 +1,7 @@
-// opencode-herdr coordination panel.
+// supreme-consciousness coordination panel.
 //
 // Presentation and interaction layer only: it renders the inbox/outbox/wait
-// tokens published by the opencode-herdr plugin (via the `herdr` shim's
+// tokens published by the supreme-consciousness plugin (via the `herdr` shim's
 // metadata files), the plugin's agent inventory, live coordination activity
 // (pending work and the transition feed), and a human-review history of what
 // each agent asked another to do (read-only projection of the coordination
@@ -12,7 +12,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, exec, readTextFile, run, home, setBadge, checking } from "herdr";
 
-const METADATA = () => `${home()}/.local/state/opencode-herdr/metadata`;
+const METADATA = () => `${home()}/.local/state/supreme-consciousness/metadata`;
 
 // token/state prefixes -> semantic theme colors (light and dark themes name the same colors)
 const COLOR = {

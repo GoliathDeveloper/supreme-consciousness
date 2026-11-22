@@ -53,7 +53,7 @@ const safePhase = /^[a-z][a-z0-9_]{0,47}$/
 const runId = randomUUID()
 const config = process.env.XDG_CONFIG_HOME
 // Relative XDG paths are invalid under the XDG specification.
-const directory = join(config && isAbsolute(config) ? resolve(config) : join(homedir(), '.config'), 'opencode', 'opencode-herdr', 'logs')
+const directory = join(config && isAbsolute(config) ? resolve(config) : join(homedir(), '.config'), 'opencode', 'supreme-consciousness', 'logs')
 const health: LoggingStatus = { directory, failedWrites: 0, droppedRecords: 0 }
 let pending = 0
 let tail = Promise.resolve()

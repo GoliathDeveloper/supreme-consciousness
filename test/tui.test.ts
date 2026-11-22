@@ -8,7 +8,7 @@ import { join } from "node:path";
 ensureRuntimePluginSupport();
 
 test("sidebar renders real OpenTUI content, wraps narrow rows, and collapses", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "opencode-herdr-tui-"));
+  const dir = await mkdtemp(join(tmpdir(), "supreme-consciousness-tui-"));
   const old = process.env.HERDR_ENV;
   process.env.HERDR_ENV = "1";
   let renderer;

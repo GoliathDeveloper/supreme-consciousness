@@ -53,7 +53,7 @@ export function createSidebarPublisher(run = promisify(execFile)) {
         try {
             await run("herdr", [
                 "pane", "report-metadata", paneId,
-                "--source", "opencode-herdr", "--agent", "opencode",
+                "--source", "supreme-consciousness", "--agent", "opencode",
                 "--applies-to-source", "herdr:opencode", "--ttl-ms", "30000",
                 "--plugin-root", pluginRoot,
                 ...Object.entries(tokens).flatMap(([name, value]) => ["--token", `${name}=${value}`]),

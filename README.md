@@ -1,4 +1,4 @@
-# opencode-herdr
+# supreme-consciousness
 
 An OpenCode **V2** plugin for agent-to-agent coordination, built to run inside the
 [Herdr](https://herdr.dev) desktop app. Agents discover each other, queue tasks and
@@ -17,7 +17,7 @@ to Herdr's sidebar — with a persistent SQLite store as the single source of tr
 | --- | --- | --- |
 | **Plugin** (`src/`, loaded by OpenCode) | Agent communication: messages, questions, replies, results, decisions, delivery | The only authority. Owns the SQLite coordination store. |
 | **`herdr` shim** (`~/.local/bin/herdr`) | Compatibility bridge: translates the plugin's Herdr calls onto `herdr-app` / `herdr-core` and OpenCode's HTTP API | Stateless translator. Writes sidebar tokens for the mod. |
-| **Herdr mod** (`~/.config/herdr-app/mods/opencode-herdr/`) | Visibility: agent list, status dots, inbox/outbox/wait tokens; click-to-focus | Presentation and interaction only. Never changes coordination state. |
+| **Herdr mod** (`~/.config/herdr-app/mods/supreme-consciousness/`) | Visibility: agent list, status dots, inbox/outbox/wait tokens; click-to-focus | Presentation and interaction only. Never changes coordination state. |
 
 The GUI is a presentation layer, **not** the source of truth for collaboration.
 
@@ -144,7 +144,7 @@ The V2 server part (`Plugin.define`) registers 13 tools and a `/herdr` command:
 ### 2. The SQLite store (`src/store.ts`)
 
 Every request, generation, delivery, result, question, notice and operation lives in
-`~/.config/opencode/opencode-herdr/coordination.sqlite` (WAL, STRICT tables, deferred
+`~/.config/opencode/supreme-consciousness/coordination.sqlite` (WAL, STRICT tables, deferred
 foreign keys, audit triggers). Two drivers behind one interface:
 
 - **Bun** (OpenCode's plugin host, coordination tests): native `bun:sqlite`
@@ -166,7 +166,7 @@ translates to the installed desktop generation:
 | --- | --- |
 | `herdr agent list` | `herdr-app ls` + `hc get` (panes, cwd) + OpenCode `/api/session` + `/api/session/active` (session identity + running state) |
 | `herdr pane split/get/list/close/run` | `herdr-app do pane.*` / `terminal.open` / `hc send` |
-| `herdr pane report-metadata` | Writes sidebar tokens to `~/.local/state/opencode-herdr/metadata/<pane>.json` for the mod |
+| `herdr pane report-metadata` | Writes sidebar tokens to `~/.local/state/supreme-consciousness/metadata/<pane>.json` for the mod |
 | `herdr pane of-terminal <t>` | Helper used by `~/.zshrc` to resolve `HERDR_PANE_ID` from `HC_TERMINAL_ID` |
 
 It resolves its binaries against `PATH` and then the usual install locations, so it
@@ -174,7 +174,7 @@ works from launch daemons and minimal environments. OpenCode session identity co
 from OpenCode itself; the shim prefers the *running* session in a terminal's directory
 and otherwise the most recently updated one.
 
-### 4. The Herdr mod (installed at `~/.config/herdr-app/mods/opencode-herdr/`)
+### 4. The Herdr mod (installed at `~/.config/herdr-app/mods/supreme-consciousness/`)
 
 A gpui-kit panel that renders, every 2 seconds:
 
@@ -201,8 +201,8 @@ npm run build        # emits dist/ (server: dist/index.js)
 
 # 3. Shim + mod are already installed at:
 #    ~/.local/bin/herdr
-#    ~/.config/herdr-app/mods/opencode-herdr/
-#    Show the panel: clone a layout, add a block with {"mod": "opencode-herdr"},
+#    ~/.config/herdr-app/mods/supreme-consciousness/
+#    Show the panel: clone a layout, add a block with {"mod": "supreme-consciousness"},
 #    then layout.switch — or toggle it as an overlay with mod.open.
 
 # 4. Environment (~/.zshrc) — Herdr sets HC_TERMINAL_ID/HC_TERMINAL_SOCKET per terminal
@@ -216,7 +216,7 @@ fi
 opencode service restart   # or test with `opencode --standalone` in a Herdr terminal
 ```
 
-**Activation check:** `opencode plugin list` must show `opencode-herdr`, and the
+**Activation check:** `opencode plugin list` must show `supreme-consciousness`, and the
 mod's sidebar panel should list your agent panes with status dots.
 
 ## Using it

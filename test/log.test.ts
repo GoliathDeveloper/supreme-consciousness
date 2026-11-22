@@ -13,7 +13,7 @@ const maxBytes = 16 * 1024 * 1024
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'herdr-log-'))
   roots.push(root)
-  const directory = join(root, 'opencode', 'opencode-herdr', 'logs')
+  const directory = join(root, 'opencode', 'supreme-consciousness', 'logs')
   mkdirSync(directory, { recursive: true })
   return { root, directory, file: join(directory, `${day}.jsonl`) }
 }
@@ -183,7 +183,7 @@ test('unset or relative XDG_CONFIG_HOME uses the home config directory', async (
   const f = fixture()
   for (const xdg of ['', 'relative-config']) {
     const status = await run(xdg, `await log('plugin_ready'); console.log(JSON.stringify(loggingStatus()));`, { HOME: f.root })
-    expect(status.directory).toBe(join(f.root, '.config', 'opencode', 'opencode-herdr', 'logs'))
+    expect(status.directory).toBe(join(f.root, '.config', 'opencode', 'supreme-consciousness', 'logs'))
     expect(status.failedWrites).toBe(0)
   }
   expect(existsSync(resolve('relative-config'))).toBe(false)

@@ -69,7 +69,7 @@ function trust(value: unknown): RemoteTrust {
   return { trustedOrigins }
 }
 
-export function readRemoteConfig(configPath = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'opencode', 'opencode-herdr', 'peers.json')): RemoteConfig {
+export function readRemoteConfig(configPath = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'opencode', 'supreme-consciousness', 'peers.json')): RemoteConfig {
   configPath = path(configPath)
   // Check all path components, then open without following a final symlink.
   for (let part = configPath; ; part = dirname(part)) {

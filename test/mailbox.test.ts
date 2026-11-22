@@ -3,7 +3,7 @@ import { ensureRuntimePluginSupport } from "@opentui/solid/runtime-plugin-suppor
 import { testRender } from "@opentui/solid";
 import { RGBA, TextRenderable, type BaseRenderable } from "@opentui/core";
 import { createSignal } from "solid-js";
-import { createSidebarPublisher, queueTokens, requestPresentation, type Request } from "../src/sidebar.js";
+import { createSidebarPublisher, pluginRoot, queueTokens, requestPresentation, type Request } from "../src/sidebar.js";
 
 ensureRuntimePluginSupport();
 
@@ -195,8 +195,9 @@ test("metadata publishes display-only arguments, caches success, refreshes TTL a
     setSystemTime(new Date("2026-10-02T00:00:00Z"));
     expect(await publish("pane-1", "session-1", projection)).toBe(true);
     expect(calls[0]).toEqual(["herdr", [
-      "pane", "report-metadata", "pane-1", "--source", "opencode-herdr", "--agent", "opencode",
+      "pane", "report-metadata", "pane-1", "--source", "supreme-consciousness", "--agent", "opencode",
       "--applies-to-source", "herdr:opencode", "--ttl-ms", "30000",
+      "--plugin-root", pluginRoot,
       "--token", "herdr_inbox=queued 1", "--token", "herdr_outbox=idle 0", "--token", "herdr_wait=idle 0",
     ], { timeout: 2_000 }]);
     expect(JSON.stringify(calls)).not.toContain("PRIVATE");

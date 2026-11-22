@@ -107,7 +107,7 @@ describe('identity and persistence', () => {
     try {
       const store = new Store()
       stores.push(store)
-      expect(statSync(join(dir, 'opencode', 'opencode-herdr', 'coordination.sqlite')).isFile()).toBe(true)
+      expect(statSync(join(dir, 'opencode', 'supreme-consciousness', 'coordination.sqlite')).isFile()).toBe(true)
     } finally {
       if (previous === undefined) delete process.env.XDG_CONFIG_HOME
       else process.env.XDG_CONFIG_HOME = previous

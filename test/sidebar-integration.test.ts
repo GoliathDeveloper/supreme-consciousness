@@ -51,7 +51,7 @@ test("built sidebar renders persisted coordination alongside shortcuts without c
     const machineId = store.machineId;
     store.close();
     store = undefined;
-    const path = join(dir, "opencode", "opencode-herdr", "coordination.sqlite");
+    const path = join(dir, "opencode", "supreme-consciousness", "coordination.sqlite");
     expect((await stat(path)).isFile()).toBe(true);
     expect((await stat(path)).mode & 0o777).toBe(0o600);
 

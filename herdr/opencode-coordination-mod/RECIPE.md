@@ -38,7 +38,7 @@ theme and other panels stay as they are.
 
 ## Requirements — the panel is the presentation layer of a plugin
 
-This mod renders data produced by the **opencode-herdr plugin** (an OpenCode
+This mod renders data produced by the **supreme-consciousness plugin** (an OpenCode
 plugin): the coordination store, per-pane metadata and the inventory shim.
 Without the plugin the panel renders but reports
 *"Coordination metadata unavailable"*. Install the plugin first — see
@@ -74,8 +74,8 @@ through OpenCode; the mesh spans machines via the plugin's SSH transport
 
 On the machine whose agents should join the mesh:
 
-1. `git clone https://github.com/GoliathDeveloper/supreme-couscous "$HOME/.local/share/opencode-herdr"`
-   then `cd "$HOME/.local/share/opencode-herdr" && npm install --omit=dev && npm run build`
+1. `git clone https://github.com/GoliathDeveloper/supreme-consciousness "$HOME/.local/share/supreme-consciousness"`
+   then `cd "$HOME/.local/share/supreme-consciousness" && npm install --omit=dev && npm run build`
 2. Register the plugin in `~/.config/opencode/opencode.jsonc`:
    `"plugins": [ { "package": "<the absolute path above>" } ]`
 3. Install the inventory shim:

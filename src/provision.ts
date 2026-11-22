@@ -139,7 +139,7 @@ export class Provisioner {
         if (branches.trim()) throw new Error('Isolation branch already exists')
         baseCommit = (await this.command('git', ['-C', folder, 'rev-parse', '--verify', '--end-of-options', `${isolation.baseCommit}^{commit}`], folder, ctx.abort)).trim()
         if (!/^[a-f0-9]{40,64}$/.test(baseCommit)) throw new Error('Invalid resolved base commit')
-        const parent = join(absolute(this.env.HOME || homedir()), '.config', 'opencode', 'opencode-herdr', 'worktrees')
+        const parent = join(absolute(this.env.HOME || homedir()), '.config', 'opencode', 'supreme-consciousness', 'worktrees')
         destination = join(parent, op.id)
         const rel = relative(root, destination)
         if (!rel.startsWith('../') && rel !== '..' && !isAbsolute(rel)) throw new Error('Isolation worktree must be outside the repository')

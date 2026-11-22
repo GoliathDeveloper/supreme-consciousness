@@ -328,7 +328,7 @@ test('request and response byte limits reject without leaking remote diagnostics
 test('helper process uses persistent local Store, stdin only and generic failure output', async () => {
   const f = fixture()
   const root = directory()
-  const configDir = join(root, 'opencode', 'opencode-herdr')
+  const configDir = join(root, 'opencode', 'supreme-consciousness')
   mkdirSync(configDir, { recursive: true })
   writeFileSync(join(configDir, 'peers.json'), JSON.stringify({ server: f.trust }), { mode: 0o600 })
   const remote = open(join(configDir, 'coordination.sqlite'))

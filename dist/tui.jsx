@@ -76,13 +76,13 @@ function Sidebar(props) {
   </box>;
 }
 export default Plugin.define({
-    id: "opencode-herdr.shortcuts",
+    id: "supreme-consciousness.shortcuts",
     setup: async (context) => {
         if (process.env.HERDR_ENV !== "1")
             return;
         const options = context.options;
         if (options.configPath !== undefined && (typeof options.configPath !== "string" || !options.configPath)) {
-            throw new Error("opencode-herdr: configPath must be a non-empty string");
+            throw new Error("supreme-consciousness: configPath must be a non-empty string");
         }
         let shortcuts;
         try {

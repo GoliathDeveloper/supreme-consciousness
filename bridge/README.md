@@ -4,7 +4,7 @@ Canonical copies of the two installed bridge components. Install = copy:
 
 ```sh
 cp bridge/herdr-shim.mjs ~/.local/bin/herdr && chmod +x ~/.local/bin/herdr
-cp -R bridge/mods/opencode-herdr ~/.config/herdr-app/mods/
+cp -R bridge/mods/supreme-consciousness ~/.config/herdr-app/mods/
 ```
 
 ## `herdr` shim (`~/.local/bin/herdr`)
@@ -21,7 +21,7 @@ desktop generation (`herdr-app` / `herdr-core`) plus OpenCode's HTTP API:
   (read-only `sqlite3`): who asked whom, the briefs, outcomes, lifecycle
   transitions, and processed counts
 
-## Mod (`~/.config/herdr-app/mods/opencode-herdr/`)
+## Mod (`~/.config/herdr-app/mods/supreme-consciousness/`)
 
 Presentation layer only: agent list with status dots, the
 `$herdr_inbox/outbox/wait` tokens, a **processed** count, and the reviewer's
