@@ -125,29 +125,40 @@ async function agentList() {
     list.push(session);
     byDirectory.set(session.directory, list);
   }
+  // Only terminals actually running OpenCode are agents. A plain shell in the
+  // same directory (e.g. where the test scripts run) must never be attributed
+  // a session: the TUI reports itself via foreground process + OSC 7501 status.
+  const isAgentPane = (term) =>
+    term.detail?.foreground?.name === 'opencode' || term.detail?.status?.app === 'opencode';
   // Same conversation attached in more than one pane: the store refuses to
   // serve a session from two panes, so surface the conflict to the human.
   const sessionPanes = new Map();
-  for (const term of terms) {
+  for (const term of terms.filter(isAgentPane)) {
     const candidates = term.directory ? (byDirectory.get(term.directory) ?? []) : [];
     const running = candidates.filter(s => active[s.id]?.type === 'running');
     const picked = (running.length ? running : candidates).sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (picked) sessionPanes.set(picked.id, (sessionPanes.get(picked.id) ?? 0) + 1);
   }
   const agents = [];
-  for (const term of terms) {
+  for (const term of terms.filter(isAgentPane)) {
     const candidates = term.directory ? (byDirectory.get(term.directory) ?? []) : [];
     if (!candidates.length) continue;
     const running = candidates.filter(s => active[s.id]?.type === 'running');
     const picked = (running.length ? running : candidates).sort((a, b) => b.updatedAt - a.updatedAt)[0];
     const panes = sessionPanes.get(picked.id) ?? 1;
+    // Prefer the TUI's own OSC 7501 state; the server-side execution map
+    // catches turns the TUI has not rendered yet (delivery-worker prompts).
+    const tuiState = term.detail?.status?.state;
+    const agent_status = tuiState === 'working' || active[picked.id]?.type === 'running'
+      ? 'working'
+      : (tuiState ?? (active[picked.id]?.type === 'running' ? 'working' : 'idle'));
     agents.push({
       pane_id: term.paneId,
       terminal_id: term.terminalId,
       workspace_id: term.workspaceId,
       cwd: term.directory,
       agent: 'opencode',
-      agent_status: active[picked.id]?.type === 'running' ? 'working' : 'idle',
+      agent_status,
       name: term.tab.name ?? term.entry.name ?? picked.title ?? picked.id,
       ...(panes > 1 ? { conflict: panes } : {}),
       agent_session: { agent: 'opencode', kind: 'id', value: picked.id },
