@@ -80,7 +80,7 @@ request_agent identity=<id> kind=task idempotencyKey=<fresh-key> text="…"
 ```
 
 Inspect everything afterwards with `inspect_request requestId=…` (own requests)
-or read the store directly: `~/.config/opencode/opencode-herdr/coordination.sqlite`.
+or read the store directly: `~/.config/opencode/supreme-consciousness/coordination.sqlite`.
 
 ## 2026-11-22 10:05 — first full mesh round: all four agents greeted each other
 

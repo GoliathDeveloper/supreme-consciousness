@@ -18,8 +18,8 @@ daemon, remote installation, arbitrary command API, or resource-cleanup RPC.
 
 ## Configuration
 
-The local file is `~/.config/opencode/opencode-herdr/peers.json`, or
-`$XDG_CONFIG_HOME/opencode/opencode-herdr/peers.json` when configured. It must be a
+The local file is `~/.config/opencode/supreme-consciousness/peers.json`, or
+`$XDG_CONFIG_HOME/opencode/supreme-consciousness/peers.json` when configured. It must be a
 regular file owned by the running OS user, mode `0600`, with no symlinks in its
 path. Missing files fail closed. No peers are configured by default.
 
@@ -29,7 +29,7 @@ path. Missing files fail closed. No peers are configured by default.
     {
       "id": "build-machine",
       "sshTarget": "worker@build-machine",
-      "helperPath": "/opt/opencode-herdr/dist/remote-helper.js",
+      "helperPath": "/opt/supreme-consciousness/dist/remote-helper.js",
       "expectedMachineId": "REPLACE_WITH_RECEIVER_DATABASE_UUID",
       "token": "REPLACE_WITH_INDEPENDENT_RANDOM_SECRET"
     }

@@ -1,7 +1,7 @@
 # Herdr Sidebar
 
 The server plugin publishes display-only metadata through `herdr pane report-metadata`
-under source `opencode-herdr`, scoped to Herdr's `herdr:opencode` integration.
+under source `supreme-consciousness`, scoped to Herdr's `herdr:opencode` integration.
 It never changes the reported agent lifecycle state. Reports expire after 30 seconds
 and unchanged reports refresh after 10 seconds.
 

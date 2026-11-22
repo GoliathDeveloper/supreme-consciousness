@@ -4,7 +4,7 @@ Status: Partially implemented. See [Cutover and Limitations](cutover.md) for sup
 
 Date: 2026-10-02
 
-Target: `opencode-herdr`
+Target: `supreme-consciousness`
 
 Baseline: `herdr-envoy` at `48886af8c97f4ee7a8be856100bd4daa2ab83251`
 
@@ -32,7 +32,7 @@ the separate `herdr-envoy` repository.
 - An independent agent can be closed at its owner's request.
 - Sending work does not transfer ownership of the recipient or its resources.
 - Persistence uses SQLite behind a transactional storage layer, located at
-  `~/.config/opencode/opencode-herdr/coordination.sqlite`.
+  `~/.config/opencode/supreme-consciousness/coordination.sqlite`.
 - Each machine owns its local store. Cross-machine collaboration communicates
   between those machines rather than sharing a database file or central database.
 
@@ -507,7 +507,7 @@ failure, cancellation or shutdown decisions.
 
 Agreed: SQLite behind a transactional storage layer, with one database per user
 per machine shared across that user's projects:
-`~/.config/opencode/opencode-herdr/coordination.sqlite`.
+`~/.config/opencode/supreme-consciousness/coordination.sqlite`.
 This is mutable runtime state colocated with OpenCode configuration by choice,
 not a file to commit or synchronise with dotfiles. Keep the database and its
 SQLite sidecar files on a local filesystem. Use SQLite-consistent backups rather

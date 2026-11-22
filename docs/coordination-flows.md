@@ -23,7 +23,7 @@ agent closure at its owner's request. Queue priority, approval mechanisms and
 other design choices remain proposals pending agreement.
 
 Persistence is agreed: SQLite with a transactional storage layer at
-`~/.config/opencode/opencode-herdr/coordination.sqlite`, shared across projects
+`~/.config/opencode/supreme-consciousness/coordination.sqlite`, shared across projects
 for one user on one machine. Each machine owns its local store. Cross-machine
 collaboration will use operations between machines, not a shared database file
 or central database. Remote transport and delivery contracts remain unspecified

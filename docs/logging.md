@@ -78,7 +78,7 @@ Readback constructs fresh records with this same allowlist. Unknown properties a
 
 ## Storage And Bounds
 
-- Default directory: `~/.config/opencode/opencode-herdr/logs`. An absolute `XDG_CONFIG_HOME` replaces `~/.config`. Empty or relative XDG paths are ignored.
+- Default directory: `~/.config/opencode/supreme-consciousness/logs`. An absolute `XDG_CONFIG_HOME` replaces `~/.config`. Empty or relative XDG paths are ignored.
 - Daily files are named `YYYY-MM-DD.jsonl`, based on the enqueue timestamp in UTC. The app-specific directory and `logs` directory are enforced as mode `0700`. Newly created ancestors use `0700`, but existing shared config ancestors are not chmodded. Log files are enforced as mode `0600` before appending.
 - Every ancestor is opened with `O_DIRECTORY | O_NOFOLLOW`, and child operations use pinned directory descriptors. Final files use `O_NOFOLLOW`; writes use `O_APPEND | O_CREAT`. Non-regular files, hard-linked files and app directories/files not owned by the effective process user are refused.
 - Descriptor-relative paths use `/proc/self/fd` on Linux and `/dev/fd` elsewhere. A missing or incompatible descriptor filesystem, symlinked home/config ancestor, or unsupported platform fails closed. There is no unsafe path-based fallback. This is tested on Linux with Bun. It is not protection against a malicious process with the same UID or root, nor against an administrator making an existing ancestor writable to other users.

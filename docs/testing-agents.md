@@ -17,7 +17,7 @@ the **Now** feed (live transitions), per-agent tokens (`in/out/wait`), the
 ## Prerequisites (30-second health check)
 
 ```sh
-opencode plugin list        # opencode-herdr must be listed
+opencode plugin list        # supreme-consciousness must be listed
 ~/.local/bin/herdr agent list   # must report your OpenCode panes with session ids
 ```
 

@@ -1,4 +1,4 @@
-# opencode-coordination
+# supreme-consciousness
 
 A live coordination panel added to your existing Herdr window: which OpenCode
 agents are on the mesh, what each owes and has delivered, live transitions as
@@ -7,7 +7,7 @@ history of every request between agents — all read from the coordination
 store, which stays the single source of truth. Your sidebar, status bar,
 theme and other panels stay as they are.
 
-![opencode-coordination](preview.png)
+![supreme-consciousness](preview.png)
 
 ## What you see
 
@@ -54,7 +54,7 @@ through OpenCode; the mesh spans machines via the plugin's SSH transport
    person that this panel reads the coordination store and published
    metadata, and that its two buttons run `node` against the installed
    plugin's scripts.
-2. Copy `mods/opencode-coordination/` into Herdr's home
+2. Copy `mods/supreme-consciousness/` into Herdr's home
    (`~/.config/herdr-app/mods/`). If it already holds this panel, update that
    installation instead of installing a duplicate.
 3. Add this block to the layout where the panel should live (a sidebar column
@@ -62,12 +62,12 @@ through OpenCode; the mesh spans machines via the plugin's SSH transport
 
    ```json
    { "id": "coordination", "type": "block", "size": { "weight": 1.4 },
-     "min": 260, "content": { "mod": "opencode-coordination" } }
+     "min": 260, "content": { "mod": "supreme-consciousness" } }
    ```
 
    Reuse the node if a coordination block already exists; do not append
    duplicates, and do not touch unrelated nodes.
-4. Check the mod with `herdr-app check ~/.config/herdr-app/mods/opencode-coordination`
+4. Check the mod with `herdr-app check ~/.config/herdr-app/mods/supreme-consciousness`
    and try it in the app. No key bindings are required.
 
 ## Install the coordination plugin
@@ -101,7 +101,7 @@ cross-machine peers (SSH + token pairing) and the request lifecycle.
 
 ## Done when
 
-- `herdr-app check ~/.config/herdr-app/mods/opencode-coordination` passes.
+- `herdr-app check ~/.config/herdr-app/mods/supreme-consciousness` passes.
 - The existing window keeps its sidebar, status bar, theme, panels and keys —
   only the coordination block was added.
 - With the plugin installed and an agent running, the panel shows the agent

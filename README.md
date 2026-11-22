@@ -5,6 +5,14 @@ An OpenCode **V2** plugin for agent-to-agent coordination, built to run inside t
 instructions, hand work back with immutable receipts, and publish live queue state
 to Herdr's sidebar — with a persistent SQLite store as the single source of truth.
 
+> **Credit.** This project began as a port and extension of
+> [quintindk/opencode-herdr](https://github.com/quintindk/opencode-herdr) —
+> the original idea for agent-to-agent coordination inside Herdr. The store
+> schema, request lifecycle, delivery-worker pattern and the agent tools
+> descend from that design; this build modernises it for OpenCode V2 and the
+> Herdr desktop generation, and adds the integrity guard, the relay test kit
+> and the honest-status projections documented below.
+
 > **Runtime note.** The original design targeted the Herdr TUI generation
 > (`herdr` CLI, `bun:sqlite`, V1 plugin API). This build runs on today's stack:
 > OpenCode 2.3.2 (V2 plugin API), the Herdr desktop generation
@@ -183,6 +191,11 @@ A gpui-kit panel that renders, every 2 seconds:
   delivery worker, colour-coded with Herdr's semantic theme colors
   (blue = queued, accent = active, yellow = blocked/needs review, green = done, red = failed)
 
+Plus the **Hello test** (▶ starts an agent-to-agent relay cascade, ✕ cancels
+in-flight legs, live leg watch with verdicts), the **Now** transition feed,
+the **History** review of every request, and a `⇄ N` window badge while
+coordination work is owed.
+
 Clicking an agent row focuses its pane (`agent.focus`). It never mutates coordination
 state. Token semantics: only accepted **tasks** count toward `wait`; instructions
 release their queue slot on acceptance.
@@ -246,6 +259,37 @@ two-agent chain with the audit trail is in
 Agents that are reserved for closure refuse new work; a close operation keeps its
 reservation even when the caller reports failure, until reconciliation confirms it.
 
+## The integrity guard
+
+Handback summaries are agent prose — and agents cut corners (one demo pane
+fabricated "all 4 agents said hello" seven consecutive times without relaying
+anything). So a brief that instructs a relay (`request_agent` with a prescribed
+idempotency key) makes that key a **checkable promise**: `hand_back` verifies
+the promised request exists and publishes the result with
+`validation: "rejected"` plus a risk naming the missing key when it doesn't.
+Agents cannot self-approve — `rejected` is the only caller-supplied validation
+value. History renders it as "Validation rejected", and the relay verdict
+separates **round completion** from **protocol quality** ("all 4 legs
+traversed · guard caught 1 deviation (leg 1)").
+
+## The test kit (`scripts/`)
+
+| Script | Purpose |
+| --- | --- |
+| `hello-test.mjs` | **The** agent-to-agent greeting cascade — the mod's ▶ button starts leg 1; the agents relay the rest themselves. `--flat` is the labelled reliability fallback (fan-out, not agent-calls-agent) |
+| `chain-test.mjs --hops 4\|6` | The multi-turn relay chains |
+| `hello-cancel.mjs` / `cancel-request.mjs` | One-click cleanup of in-flight or stuck legs |
+| `watch-store.mjs` | Read-only live view: requests, deliveries, audit trail |
+| `send-request.mjs` | Queue one task/instruction from a terminal |
+
+## Status honesty
+
+The mod merges two status sources — the TUI's own OSC 7501 signal and the
+server's execution map — and **shows both when they disagree**
+(`working · tui reports idle`). Server-initiated turns (deliveries, nudges)
+run without the TUI's signal ever painting "working"; the merged view is the
+truthful one, and the panel says so rather than picking a side silently.
+
 ## Testing
 
 ```sh
@@ -268,11 +312,10 @@ is a symlink chain; production code checks paths the way real project folders ar
 - **Service environment** — the shared OpenCode service must be restarted after env
   changes; the plugin refuses tools until the session is reported by Herdr with a
   matching pane/socket/directory.
-- **Session correlation** — the shim maps one OpenCode session per terminal
-  (running session preferred, else most recent in that directory). Multiple OpenCode
-  instances in the *same directory* can be ambiguous; distinct directories are exact.
-- **TUI part** — `dist/tui.jsx` is still a V1 TUI plugin; the desktop mod covers the
-  sidebar role on this machine. A V2 TUI port is future work.
+- **Session correlation** — the shim binds panes to sessions by the TUI's own
+  display signal (`time.viewed`), the TUI's OSC 7501 title while working, or
+  the pane's running turn; a recency guess is flagged ambiguous instead of
+  silently chosen. Distinct directories remain the exact case.
 - **Provisioning panes** — `open_agent` places new panes relative to the caller's
   pane and may briefly move focus (the desktop generation has no "split beside a
   non-focused pane" primitive yet).
