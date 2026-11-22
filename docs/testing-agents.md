@@ -214,7 +214,10 @@ request then sticks at `submitted` forever, no activity appears anywhere
 was declared at 6000. Rules: any `llama-local` tier entry must declare
 **≥ ~10k** or sessions on it cannot host coordination at all (the 8K tier
 is a known trap); and the panel's "coordination" badge means *an obligation
-exists in the store*, not that a turn is running.
+exists in the store*, not that a turn is running. The **default model**
+must likewise be a ≥32k tier — every new session inherits it at birth, and
+a fresh session on an under-declared default is starved before its first
+turn (the "did /new and then nothing" signature).
 
 **Free OpenRouter models 429.** Daily free-tier limit — use local models
 (`llama-local/lfm3-opencode`) or a paid model for the test window.
