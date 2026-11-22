@@ -55,6 +55,7 @@ export default class CoordinationPanel extends View {
     this.processed = 0;
     this.counts = {};
     this.error = null;
+    this.helloStatus = null;
     cx.spawn(async (cx) => {
       while (true) {
         await this.refresh();
@@ -96,7 +97,7 @@ export default class CoordinationPanel extends View {
       this.error = this.error ?? `Agent inventory unavailable: ${String(error).slice(0, 120)}`;
     }
     try {
-      const review = await exec("herdr", ["review", "12"]);
+      const review = await exec("herdr", ["review", "24"]);
       const parsed = JSON.parse(review.stdout || "{}")?.result;
       if (review.code === 0 && parsed) {
         this.history = parsed.requests ?? [];
@@ -202,6 +203,78 @@ export default class CoordinationPanel extends View {
     return row;
   }
 
+  // ——— Hello test: round-robin greeting across all live agents ———
+  //
+  // The ▶ button shells out to scripts/hello-test.mjs (the mod itself never
+  // mutates the store); the watch below renders the legs of the latest run
+  // live from the same review projection, keyed on idempotencyKey "hello-*".
+
+  runHello() {
+    const t = theme();
+    this.helloStatus = { text: "starting hello round…", color: t.dim };
+    exec("node", [`${home()}/Projects/Herdr-A2A/scripts/hello-test.mjs`]).then((res) => {
+      const lines = (res.stdout || "").split("\n").filter(Boolean);
+      if (res.code === 0) {
+        this.helloStatus = { text: clip(lines[1] ?? lines[0] ?? "hello round enqueued", 150), color: t.done };
+      } else {
+        const reason = (res.stderr || "").split("\n").find((l) => l.startsWith("Refusing")) ?? (res.stderr || "").split("\n").find(Boolean) ?? `exit ${res.code}`;
+        this.helloStatus = { text: clip(reason, 150), color: t.blocked };
+      }
+    }).catch((error) => {
+      this.helloStatus = { text: clip(`hello test failed: ${String(error).slice(0, 130)}`, 150), color: t.blocked };
+    });
+  }
+
+  // Legs of the newest hello run plus a one-line verdict. Grouping key is the
+  // idempotencyKey prefix "hello-<run>-leg<n>"; runs sort by their base36 stamp.
+  helloRun() {
+    const legs = (this.history ?? [])
+      .filter((e) => typeof e.key === "string" && e.key.startsWith("hello-"))
+      .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    if (!legs.length) return null;
+    const run = legs[legs.length - 1].key.replace(/-leg\d+$/, "");
+    const round = legs.filter((e) => e.key.startsWith(`${run}-leg`)).map((e) => ({
+      ...e, n: Number(e.key.match(/-leg(\d+)$/)?.[1] ?? 0), total: Number(run.match(/^hello-/) ? legs.filter(l => l.key.startsWith(`${run}-leg`)).length : 0),
+    }));
+    const total = round.length;
+    const completed = round.filter((l) => l.state === "completed").length;
+    const inFlight = round.find((l) => PENDING.has(l.state));
+    const failed = round.find((l) => ["failed", "cancelled"].includes(l.state));
+    let verdict = { text: `run ${run.replace(/^hello-/, "")}: leg ${Math.min(completed + 1, total)}/${total}`, color: theme().working };
+    if (total > 0 && completed === total) verdict = { text: `run ${run.replace(/^hello-/, "")}: all ${total} agents greeted each other ✓`, color: theme().done };
+    else if (failed) verdict = { text: `run ${run.replace(/^hello-/, "")}: leg ${failed.n} ${failed.state} — cancel it to unblock the round`, color: theme().blocked };
+    else if (inFlight) verdict = { text: `run ${run.replace(/^hello-/, "")}: leg ${inFlight.n}/${total} in flight (${inFlight.state})`, color: theme().working };
+    return { run, legs: round, verdict };
+  }
+
+  helloSection() {
+    const t = theme();
+    const run = this.helloRun();
+    const header = h_flex().gap(6).items_center().pt(4)
+      .child(div().font_weight(600).text_color(t.foreground).child("Hello test"))
+      .child(div().flex_1())
+      .child(div().id("hello-run").px(8).py(3).rounded(5).bg(t.canvas).text_color(t.foreground)
+        .on_click(() => this.runHello())
+        .child("▶ say hello"));
+    const status = this.helloStatus
+      ? div().text_color(this.helloStatus.color).child(this.helloStatus.text)
+      : div().text_color(t.dim).child("round-robin greeting across all live agents — click to run");
+    return v_flex().id("hello-test").gap(4)
+      .child(header)
+      .child(status)
+      .when(Boolean(run), (el) => el.child(div().text_color(run.verdict.color).child(run.verdict.text)))
+      .when(Boolean(run), (el) => el.children(run.legs.map((leg) => {
+        const color = t[STATE_COLOR[leg.state] ?? "idle"] ?? t.idle;
+        return v_flex().id(`hello-${leg.id?.slice(0, 8)}`).gap(2).p(6).rounded(5).bg(t.canvas)
+          .child(h_flex().gap(5).items_center()
+            .child(div().size(6).rounded(3).flex_none().bg(color))
+            .child(div().text_color(t.dim).flex_none().child(clock(leg.updatedAt, true)))
+            .child(div().text_color(t.foreground).flex_1().child(`leg ${leg.n}: ${clip(short(leg.origin), 22)} → ${clip(short(leg.recipient), 22)}`))
+            .child(div().text_color(color).flex_none().child(leg.state)))
+          .when(Boolean(leg.summary), (row) => row.child(div().text_color(color).child(clip(`→ ${leg.summary}`, 130))));
+      })));
+  }
+
   // One broken section must not take the whole panel down: the caught error
   // renders inline so the failure is visible instead of a frozen frame.
   safe(label, build) {
@@ -239,6 +312,7 @@ export default class CoordinationPanel extends View {
         .child(div().text_color(t.muted).flex_1().child(clip(short(step.actor), 26)))
         .child(div().text_color(t.foreground).child(step.transition))
         .child(div().text_color(t.dim).flex_none().child(step.request?.slice(0, 8) ?? ""))))))
+      .child(this.safe("hello", () => this.helloSection()))
       .child(h_flex().gap(6).items_center().pt(4)
         .child(div().font_weight(600).text_color(t.foreground).child("History"))
         .child(div().flex_1())

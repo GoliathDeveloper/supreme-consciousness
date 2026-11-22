@@ -111,6 +111,34 @@ Routes are **linear by design**: no agent ever receives a second leg while it
 still holds an open task, so no hop can deadlock the store's one-pending-per-
 agent queue. Intermediate holds queue and dispatch in order.
 
+## The hello test (all agents greet each other)
+
+A round-robin greeting across **every live OpenCode pane**: origin greets the
+first agent, who greets the next, … and the last greeting lands back on the
+origin, closing the circle. Each participant receives exactly one hello.
+
+```sh
+node scripts/hello-test.mjs                # seed the round from "Herdr-A2A"
+node scripts/hello-test.mjs --dry          # print the leg briefs only
+```
+
+The Coordination panel's **Hello test** section does this with one click —
+**▶ say hello** runs the script (the mod itself never mutates the store) and
+then watches the round live: each leg appears with its state
+(`queued → submitted → accepted → completed`), the greeter's handback summary,
+and a verdict line (`leg 2/4 in flight`, `all 4 agents greeted each other ✓`,
+or a blocked note naming the leg to cancel).
+
+Design notes:
+
+- Legs use fresh idempotency keys per run (`hello-<stamp>-legN`), so every
+  click starts a **new** round.
+- The script **refuses to start** while a previous round still has legs in
+  flight (the one-pending-per-agent queue would muddle both runs). It names
+  the blocking legs and the cancel command; `--force` overrides.
+- Legs are compact by design (~300–500 characters) so 1.7B-class local models
+  can copy them verbatim — a gentler relay test than the 4/6-hop chains.
+
 **Model requirements.** Each intermediate agent must copy the next leg's text
 verbatim — nested briefs grow with hop count (~600 characters for a 4-hop,
 ~900 for a 6-hop). Capable models handle this; a 1.7B-class local model may

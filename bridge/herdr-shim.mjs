@@ -281,7 +281,7 @@ async function sqliteJson(sql) {
 
 async function review(limit = 20) {
   const projection = `SELECT r.id, r.kind, r.originSessionId AS origin, r.recipientId AS recipient,
-      r.generation, r.createdAt, r.updatedAt, g.text AS brief, r.executionPolicy,
+      r.generation, r.createdAt, r.updatedAt, g.text AS brief, r.executionPolicy, r.idempotencyKey AS key,
       t.outcome, t.summary, t.validation, t.checks, t.risks,
       CASE WHEN r.cancelledAt IS NOT NULL THEN 'cancelled'
            WHEN t.outcome IS NOT NULL THEN t.outcome ELSE d.state END AS state
@@ -327,7 +327,7 @@ async function review(limit = 20) {
   const processed = Object.values(counts).reduce((sum, n) => sum + n, 0);
   return { result: {
     requests: requests.map(r => ({
-      id: r.id, kind: r.kind, state: r.state, generation: r.generation,
+      id: r.id, kind: r.kind, state: r.state, generation: r.generation, key: r.key ?? null,
       origin: r.origin, recipient: r.recipient, originSession: r.originSession, recipientSession: r.recipientSession,
       brief: r.brief, outcome: r.outcome ?? null, summary: r.summary ?? null,
       validation: r.validation ?? null, createdAt: r.createdAt, updatedAt: r.updatedAt,
