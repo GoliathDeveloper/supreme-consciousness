@@ -67,7 +67,7 @@ function fixture() {
   const discover = mock(async (): Promise<Agent[]> => [agent])
   const publish = mock(async () => true)
   const worker = (connection = store) => {
-    const result = new DeliveryWorker(connection, client, '/project', discover, publish)
+    const result = new DeliveryWorker(connection, client, discover, publish)
     workers.push(result)
     return result
   }
@@ -139,6 +139,50 @@ test('two workers on separate real SQLite connections claim exactly one dispatch
   expect(f.store.request(request.id).state).toBe('submitted')
   expect(f.store.request(next.id).state).toBe('queued')
   expect(f.store.history(request.id, 'origin').audit.filter(e => e.transition === 'attempt:1')).toHaveLength(1)
+})
+
+test('a live lease excludes a second worker until the first disposes', async () => {
+  const f = fixture()
+  const first = f.enqueue()
+  const workerA = f.worker()
+  await workerA.tick()
+  expect(f.session.promptAsync).toHaveBeenCalledTimes(1)
+  // Close out the first task (accept + result) so its queue slot frees; what
+  // now blocks a second worker is the lease, not the FIFO queue.
+  const submitted = f.store.request(first.id)
+  f.store.accept(first.id, submitted.generation, submitted.deliveryId, 'recipient')
+  f.store.finish(first.id, submitted.generation, 'recipient', { outcome: 'completed', summary: 'Checked', checks: [], risks: [] })
+  const second = f.enqueue()
+  const workerB = f.worker(open(f.path))
+  await workerB.tick()
+  // Worker A holds a live lease; B must not act on the agent at all.
+  expect(f.session.promptAsync).toHaveBeenCalledTimes(1)
+  expect(f.store.request(second.id).state).toBe('queued')
+  await workerA.dispose()
+  await workerB.tick()
+  expect(f.session.promptAsync).toHaveBeenCalledTimes(2)
+  expect(f.store.request(second.id).state).toBe('submitted')
+})
+
+test('serves agents in other projects: dispatch and receipts use the agent directory', async () => {
+  const f = fixture()
+  // spec-review scenario: the pane lives in another project; the store pins it
+  // like any agent and the worker must dispatch into ITS directory.
+  const remote = f.store.observeAgent({ ...f.agent, sessionId: 'other', paneId: 'pane-other',
+    terminalId: 'terminal-other', directory: '/other-project' })
+  f.runtime.id = 'other'
+  f.runtime.directory = '/other-project'
+  f.session.status.mockImplementation(async () => f.ok({ recipient: { type: 'idle' }, other: { type: 'idle' } }))
+  f.discover.mockImplementation(async () => [remote])
+  const request = f.store.enqueue({ originSessionId: 'origin', originDirectory: '/origin', recipientId: remote.id,
+    kind: 'task', text: 'Cross-project task', idempotencyKey: crypto.randomUUID() })
+  await f.worker().tick()
+  expect(f.session.promptAsync).toHaveBeenCalledTimes(1)
+  const input = f.session.promptAsync.mock.calls[0][0]
+  expect(input).toMatchObject({ path: { id: 'other' }, query: { directory: '/other-project' } })
+  expect(f.session.message.mock.calls[0][0]).toMatchObject({ path: { id: 'other', messageID: input.body.messageID },
+    query: { directory: '/other-project' } })
+  expect(f.store.request(request.id).state).toBe('submitted')
 })
 
 test('current runtime settings override history and preserve model variant', async () => {
@@ -296,8 +340,9 @@ test('the worker serves regardless of socket env; the HERDR_ENV gate still binds
 
 // The desktop generation shares one OpenCode server across panes, so a single
 // HERDR_PANE_ID cannot bind the worker to one pane. A stale or symbolic value
-// must not block service of the directory's agents; the binding authority is
-// the store's pinned identity (refused per key below) plus directory scope.
+// must not block service of machine-wide agents; the binding authority is the
+// store's pinned identity (refused per key below — directory included, since a
+// pane that moved projects is a different binding).
 test('serves the directory despite a stale HERDR_PANE_ID, and still refuses changed bindings', async () => {
   const f = fixture()
   f.enqueue()

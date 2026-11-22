@@ -63,7 +63,7 @@ function host(store: Store, name: string) {
     }),
   }
   const publish = mock(async (..._args: unknown[]) => true)
-  const worker = new DeliveryWorker(store, { session } as unknown as PluginInput['client'], agent.directory,
+  const worker = new DeliveryWorker(store, { session } as unknown as PluginInput['client'],
     async () => [agent], publish)
   workers.push(worker)
   // Simulate separate plugin processes serially without touching a real Herdr binding.

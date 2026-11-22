@@ -38,7 +38,14 @@ agents goes through the coordination store, and two background workers relay it:
 - the **recipient's** worker accepts, publishes results, and relays the outcome back
 
 Each OpenCode instance runs one plugin instance with its own `DeliveryWorker`
-(`src/delivery.ts`) ticking every 2 seconds against the same SQLite store.
+(`src/delivery.ts`) ticking every 2 seconds against the same SQLite store. The
+store is **machine-wide**: every worker observes and serves every Herdr-reported
+agent on the machine, whatever project directory its pane lives in (this is what
+lets agents in different projects coordinate). Multiple live workers are safe
+because each agent is guarded by a store **lease** (schema v3): claiming an
+agent is a compare-and-swap with a 30-second heartbeat, so exactly one live
+worker dispatches to a given pane, and a wedged worker's agents are taken over
+within a minute.
 
 ```mermaid
 sequenceDiagram

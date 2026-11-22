@@ -144,7 +144,7 @@ export default Plugin.define({
     };
     const client = legacyClient as unknown as LegacyClient;
 
-    const worker = new DeliveryWorker(store, client, directory);
+    const worker = new DeliveryWorker(store, client);
     const provisioner = new Provisioner(store, undefined, process.env, client);
     let peers: RemotePeer[] = [];
     try { peers = readRemoteConfig().peers; } catch (error) {
@@ -291,7 +291,7 @@ export default Plugin.define({
           const self = await caller(context.sessionID);
           const request = store.request(input.requestId);
           if (request.recipientId !== self.id || request.generation !== input.generation || request.deliveryId !== input.deliveryId) throw new Error("Request does not match this conversation and generation");
-          if (!request.messageId || !await worker.receipt(context.sessionID, request.messageId, requestPrompt(request))) throw new Error("Cannot confirm the delivery message");
+          if (!request.messageId || !await worker.receipt(self, request.messageId, requestPrompt(request))) throw new Error("Cannot confirm the delivery message");
           return { content: json({ request: store.accept(input.requestId, input.generation, input.deliveryId, context.sessionID), questions: store.questions(input.requestId, context.sessionID),
             policy: request.executionPolicy === "advisory" ? "Analyse and report only. Do not edit files or commit." : "Make scoped code changes. Do not commit, merge, discard or clean resources without separate authorisation." }) };
         },

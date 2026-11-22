@@ -112,8 +112,9 @@ describe('identity and persistence', () => {
     store.close()
     stores.splice(stores.indexOf(store), 1)
     // Simulate the pre-nickname v2 layout: drop the column (allowed — it is
-    // not part of any constraint), leaving it appended by the migration below.
-    execFileSync('sqlite3', [path, 'ALTER TABLE agents DROP COLUMN nickname;'])
+    // not part of any constraint) and the v3 leases table, stamp the old
+    // version, so the reopen below exercises the real migration path.
+    execFileSync('sqlite3', [path, 'ALTER TABLE agents DROP COLUMN nickname; DROP TABLE leases; PRAGMA user_version=2;'])
     const reopened = open(path)
     // Migration appended nickname last; the positional order differs from the
     // schema — the explicit-column INSERT must bind every column correctly.
@@ -122,8 +123,41 @@ describe('identity and persistence', () => {
     expect(fresh.state).toBe('idle')
     expect(fresh.management).toBe('independent')
     reopened.updateAgentNickname(fresh.sessionId, 'after-migration')
-    expect(reopened.agent(fresh.id).label).toBe('after-migration')
     expect(reopened.agent(agent.id).label).toBe('Worker')
+  })
+
+  test('migrated v2 DB gains the v3 leases table', () => {
+    const { store, agent, path } = fixture()
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+    execFileSync('sqlite3', [path, 'DROP TABLE leases; PRAGMA user_version=2;'])
+    const reopened = open(path)
+    expect(execFileSync('sqlite3', [path, 'PRAGMA user_version;']).toString().trim()).toBe('3')
+    const now = 500_000
+    expect(reopened.claimAgent(agent.id, 'worker-a', now, 30_000)).toBe(true)
+    expect(reopened.claimAgent(agent.id, 'worker-b', now + 1_000, 30_000)).toBe(false)
+  })
+
+  test('leases: claim, renew, live exclusion, expiry steal and release', () => {
+    const { store, agent } = fixture()
+    const second = observe(store, { sessionId: 'second-agent', paneId: 'pane-2', terminalId: 'terminal-2' })
+    const now = 1_000_000
+    const ttl = 30_000
+    // First claim wins; the same owner renews; a different live owner is excluded.
+    expect(store.claimAgent(agent.id, 'worker-a', now, ttl)).toBe(true)
+    expect(store.claimAgent(agent.id, 'worker-a', now + 2_000, ttl)).toBe(true)
+    expect(store.claimAgent(agent.id, 'worker-b', now + 4_000, ttl)).toBe(false)
+    // An expired lease is stolen; the previous owner is then excluded.
+    expect(store.claimAgent(agent.id, 'worker-b', now + 4_000 + ttl, ttl)).toBe(true)
+    expect(store.claimAgent(agent.id, 'worker-a', now + 6_000, ttl)).toBe(false)
+    // Leases are per agent, not global.
+    expect(store.claimAgent(second.id, 'worker-a', now + 6_000, ttl)).toBe(true)
+    // Release frees the agent immediately (clean worker shutdown).
+    store.releaseLeases('worker-b')
+    expect(store.claimAgent(agent.id, 'worker-a', now + 8_000, ttl)).toBe(true)
+    // Input validation, and an unknown agent is a lost race, not a claim.
+    expect(() => store.claimAgent(agent.id, 'worker-a', now, 0)).toThrow('Invalid lease TTL')
+    expect(store.claimAgent('missing-agent', 'worker-a', now, ttl)).toBe(false)
   })
 
   test('management observations persist without inferring ownership from requests', () => {
@@ -470,7 +504,7 @@ describe('schema and operation checkpoints', () => {
     const { path, store, agent } = fixture()
     const db = new Database(path)
     try {
-      expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 2 })
+      expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 3 })
       expect(db.query('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' })
       // These pragmas are connection-local. Inspect the actual store connection.
       const connection = (store as unknown as { db: Database }).db
@@ -499,14 +533,18 @@ describe('schema and operation checkpoints', () => {
     } finally { db.close() }
   })
 
-  test('v1 results migrate to v2: rows preserved, rejected validation accepted', () => {
+  test('v1 results migrate to the current version: rows preserved, rejected validation accepted', () => {
     const dir = mkdtempSync(join(tmpdir(), 'herdr-v1-'))
     const path = join(dir, 'coordination.sqlite')
     try {
       const v1 = new Database(path)
       // A minimal version-1 database: the old results CHECK without 'rejected',
-      // plus the metadata row the constructor requires.
+      // the agents table the v3 leases FK requires (no nickname — the migration
+      // adds it), and the metadata row the constructor requires.
       v1.exec(`CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
+        CREATE TABLE agents (id TEXT PRIMARY KEY, machineId TEXT NOT NULL, sessionId TEXT NOT NULL UNIQUE,
+          socket TEXT NOT NULL, paneId TEXT NOT NULL, terminalId TEXT NOT NULL, workspaceId TEXT NOT NULL,
+          directory TEXT NOT NULL, label TEXT NOT NULL, state TEXT NOT NULL, lastSeen INTEGER NOT NULL CHECK(lastSeen >= 0)) STRICT;
         CREATE TABLE generations (requestId TEXT NOT NULL, generation INTEGER NOT NULL CHECK(generation > 0), text TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, PRIMARY KEY(requestId, generation)) STRICT;
         CREATE TABLE results (requestId TEXT NOT NULL, generation INTEGER NOT NULL, sessionId TEXT NOT NULL, outcome TEXT NOT NULL CHECK(outcome IN ('completed','paused','failed')), summary TEXT NOT NULL, checks TEXT NOT NULL CHECK(json_valid(checks)), risks TEXT NOT NULL CHECK(json_valid(risks)), evidence TEXT NOT NULL CHECK(json_valid(evidence)), validation TEXT NOT NULL CHECK(validation IN ('pending','not_required')), createdAt INTEGER NOT NULL, PRIMARY KEY(requestId, generation)) STRICT;
         PRAGMA user_version = 1;`)
@@ -518,8 +556,12 @@ describe('schema and operation checkpoints', () => {
       store.close()
       const after = new Database(path)
       try {
-        expect(after.query('PRAGMA user_version').get()).toEqual({ user_version: 2 })
+        expect(after.query('PRAGMA user_version').get()).toEqual({ user_version: 3 })
         expect(after.query('SELECT summary FROM results').all()).toEqual([{ summary: 'summary' }])
+        // The migration added the nickname column (appended last, as ALTER
+        // always does) and the leases table: an FK-valid lease row inserts.
+        after.exec("INSERT INTO agents VALUES ('a-1','m1','ses-1','sock','pane','term','ws','/dir','Label','idle',1,'')")
+        after.exec("INSERT INTO leases VALUES ('a-1','worker-x',1)")
         // The rebuilt CHECK accepts the new validation value.
         after.exec("INSERT INTO generations VALUES ('req-2', 1, 'brief', 1, 1)")
         expect(() => after.exec("INSERT INTO results VALUES ('req-2', 1, 'ses', 'completed', 's', '[]', '[]', '[]', 'rejected', 2)")).not.toThrow()

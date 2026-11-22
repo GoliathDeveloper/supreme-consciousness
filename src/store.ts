@@ -194,17 +194,22 @@ CREATE TABLE audit_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, entityId TEXT NOT NULL,
   transition TEXT NOT NULL, sessionId TEXT NOT NULL, createdAt INTEGER NOT NULL
 ) STRICT;
+CREATE TABLE leases (
+  agentId TEXT PRIMARY KEY REFERENCES agents(id), owner TEXT NOT NULL,
+  heartbeatAt INTEGER NOT NULL CHECK(heartbeatAt >= 0)
+) STRICT;
 CREATE INDEX audit_entity ON audit_events(entityId, id);
 CREATE INDEX operations_close ON operations(json_extract(payload, '$.identity')) WHERE kind='close_agent';
 CREATE INDEX requests_recipient ON requests(recipientId);
 CREATE INDEX requests_origin ON requests(originSessionId);
 CREATE INDEX questions_request ON questions(requestId, generation);
 CREATE INDEX notifications_session ON notifications(sessionId, state);
+CREATE INDEX leases_owner ON leases(owner);
 CREATE TRIGGER generations_immutable BEFORE UPDATE ON generations BEGIN
   SELECT RAISE(ABORT, 'Generation briefs are immutable'); END;
 CREATE TRIGGER results_immutable BEFORE UPDATE ON results BEGIN
   SELECT RAISE(ABORT, 'Results are immutable'); END;
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 `
 
 const projection = `SELECT r.*, g.text, d.sequence, d.id AS deliveryId,
@@ -286,11 +291,12 @@ export class Store {
     try {
       this.db.exec('PRAGMA busy_timeout=1000; PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;')
       this.atomic(() => {
-        const version = number(this.one('PRAGMA user_version').user_version, 'schema version')
-        if (version > 2) throw new Error(`Unsupported coordination schema version ${version}; supported version is 2`)
+        let version = number(this.one('PRAGMA user_version').user_version, 'schema version')
+        if (version > 3) throw new Error(`Unsupported coordination schema version ${version}; supported version is 3`)
         if (version === 0) {
           this.db.exec(schema)
           this.run('INSERT INTO metadata(key,value) VALUES (?,?)', 'machineId', randomUUID())
+          version = 3
         }
         if (version === 1) {
           // v2: results.validation gains 'rejected' (relay integrity — a
@@ -311,12 +317,25 @@ export class Store {
             CREATE TRIGGER results_immutable BEFORE UPDATE ON results BEGIN
               SELECT RAISE(ABORT, 'Results are immutable'); END;
             PRAGMA user_version = 2;`)
+          version = 2
         }
-        if (version >= 2) {
+        if (version === 2) {
+          // Unversioned v2-era addition: agents.nickname (ALTER appends it last,
+          // so writes must always use explicit column lists).
           const cols = this.all('PRAGMA table_info(agents)')
           if (!cols.some(c => c.name === 'nickname')) {
             this.db.exec("ALTER TABLE agents ADD COLUMN nickname TEXT NOT NULL DEFAULT ''")
           }
+          // v3: leases — one delivery worker claims an agent at a time so the
+          // machine-wide store can be served by every plugin instance without
+          // double dispatch.
+          this.db.exec(`CREATE TABLE leases (
+            agentId TEXT PRIMARY KEY REFERENCES agents(id), owner TEXT NOT NULL,
+            heartbeatAt INTEGER NOT NULL CHECK(heartbeatAt >= 0)
+          ) STRICT;
+            CREATE INDEX leases_owner ON leases(owner);
+            PRAGMA user_version = 3;`)
+          version = 3
         }
       })
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;')
@@ -359,6 +378,43 @@ export class Store {
       this.run('UPDATE agents SET nickname=? WHERE id=?', nickname, agent.id)
       this.audit(agent.id, `nickname:${nickname}`, this.machineId)
     })
+  }
+
+  // Lease-based claiming (schema v3): the machine-wide store may be served by
+  // more than one plugin instance, and each agent must be acted on by at most
+  // one worker. A claim succeeds for the owner itself (renewal), an absent
+  // lease, or an expired lease (steal). Live workers renew every tick, so a
+  // takeover only happens after the owner actually stopped making progress.
+  claimAgent(agentId: string, owner: string, now: number, ttl: number): boolean {
+    text(agentId, 'agent ID')
+    text(owner, 'lease owner')
+    number(now, 'lease heartbeat')
+    if (!(ttl > 0)) throw new Error('Invalid lease TTL: expected positive number')
+    return !!this.atomic(() => {
+      const existing = this.db.query('SELECT * FROM leases WHERE agentId=?').get(agentId)
+      if (!existing) {
+        // The agent row may have vanished between the caller's inventory and
+        // here; a failed insert is a lost race, not a claim.
+        try { this.run('INSERT INTO leases(agentId,owner,heartbeatAt) VALUES (?,?,?)', agentId, owner, now) }
+        catch { return false }
+        return true
+      }
+      const lease = row(existing)
+      if (lease.owner === owner) {
+        this.run('UPDATE leases SET heartbeatAt=? WHERE agentId=?', now, agentId)
+        return true
+      }
+      if (number(lease.heartbeatAt, 'lease heartbeat') < now - ttl) {
+        this.run('UPDATE leases SET owner=?, heartbeatAt=? WHERE agentId=?', owner, now, agentId)
+        return true
+      }
+      return false
+    })
+  }
+
+  releaseLeases(owner: string): void {
+    text(owner, 'lease owner')
+    this.atomic(() => { this.run('DELETE FROM leases WHERE owner=?', owner) })
   }
 
   private saveAgent(input: AgentInput, provision = false): Agent {

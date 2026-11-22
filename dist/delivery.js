@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 // The desktop generation's plugin host does not inherit the login-shell PATH
@@ -14,6 +14,11 @@ const run = promisify(execFile);
 // match it exactly before the worker serves or dispatches to that agent.
 const IDENTITY_KEYS = ["id", "machineId", "sessionId", "socket", "paneId", "terminalId", "workspaceId", "directory"];
 export const messageId = () => `msg_${(BigInt(Date.now()) * 0x1000n & 0xffffffffffffn).toString(16).padStart(12, "0")}${randomBytes(7).toString("hex")}`;
+// Lease lifetime for agent claiming: far longer than the 2-second tick so a
+// live worker never loses an agent mid-cycle, short enough that a wedged owner
+// is taken over within a minute. The 45-second tick watchdog bounds the worst
+// single serve; the lease deliberately covers a full worst-case serve.
+export const LEASE_TTL = 30_000;
 export const requestPrompt = (r) => `[supreme-consciousness request ${r.id} generation ${r.generation}] ` +
     `Call accept_delivery with requestId="${r.id}", generation=${r.generation}, deliveryId="${r.deliveryId}". ` +
     (r.kind === "instruction" ? "This is an instruction. Reading accepts it. Do not hand back a result." :
@@ -60,17 +65,20 @@ export async function inventory(store, env = process.env, runner = run) {
 export class DeliveryWorker {
     store;
     client;
-    directory;
     discover;
     publish;
     stopped = false;
     active;
     timer;
     nextErrorAt = 0;
-    constructor(store, client, directory, discover = () => inventory(store), publish = createSidebarPublisher()) {
+    // This worker instance's lease identity. The coordination store is
+    // machine-wide, so every OpenCode server on the machine observes and serves
+    // every Herdr-reported agent regardless of project directory; leases make
+    // that safe by letting exactly one live worker act on each agent.
+    owner = randomUUID();
+    constructor(store, client, discover = () => inventory(store), publish = createSidebarPublisher()) {
         this.store = store;
         this.client = client;
-        this.directory = directory;
         this.discover = discover;
         this.publish = publish;
     }
@@ -81,27 +89,27 @@ export class DeliveryWorker {
         this.timer.unref();
         void this.tick();
     }
-    async dispose() { this.stopped = true; clearInterval(this.timer); await this.active; }
-    async receipt(sessionId, id, expected) {
-        const response = await this.client.session.message({ path: { id: sessionId, messageID: id }, query: { directory: this.directory }, signal: AbortSignal.timeout(5000) });
+    async dispose() { this.stopped = true; clearInterval(this.timer); await this.active; this.store.releaseLeases(this.owner); }
+    async receipt(agent, id, expected) {
+        const response = await this.client.session.message({ path: { id: agent.sessionId, messageID: id }, query: { directory: agent.directory }, signal: AbortSignal.timeout(5000) });
         if (response.response.status === 404)
             return false;
         if (response.error || !response.data)
             throw new Error("Message readback unavailable");
-        return response.data.info.id === id && response.data.info.sessionID === sessionId && response.data.info.role === "user" &&
+        return response.data.info.id === id && response.data.info.sessionID === agent.sessionId && response.data.info.role === "user" &&
             response.data.parts.some(p => p.type === "text" && p.text === expected);
     }
-    options() {
-        return { query: { directory: this.directory }, signal: AbortSignal.timeout(5000), throwOnError: true };
+    options(agent) {
+        return { query: { directory: agent.directory }, signal: AbortSignal.timeout(5000), throwOnError: true };
     }
     async conversation(agent) {
-        const conversation = await this.client.session.get({ ...this.options(), path: { id: agent.sessionId } });
+        const conversation = await this.client.session.get({ ...this.options(agent), path: { id: agent.sessionId } });
         if (conversation.data?.id !== agent.sessionId || conversation.data.directory !== agent.directory)
             throw new Error("Conversation binding mismatch");
         return conversation.data;
     }
     async idle(agent) {
-        const status = await this.client.session.status(this.options());
+        const status = await this.client.session.status(this.options(agent));
         // The status endpoint omits idle sessions. An absent response is not an idle session.
         return !!status.data && (!status.data[agent.sessionId] || status.data[agent.sessionId].type === "idle");
     }
@@ -134,7 +142,7 @@ export class DeliveryWorker {
             variant = selected.variant;
         }
         if (!persona || !model) {
-            const messages = await this.client.session.messages({ ...this.options(), path: { id: agent.sessionId } });
+            const messages = await this.client.session.messages({ ...this.options(agent), path: { id: agent.sessionId } });
             if (!messages.data)
                 throw new Error("Message history unavailable");
             const user = [...messages.data].reverse().find(m => m.info.role === "user")?.info;
@@ -152,7 +160,7 @@ export class DeliveryWorker {
                 }
             }
             else if (!model && persona) {
-                const config = await this.client.config.get(this.options());
+                const config = await this.client.config.get(this.options(agent));
                 const configured = config.data?.model;
                 const slash = configured?.indexOf("/") ?? -1;
                 if (configured && slash > 0 && slash < configured.length - 1) {
@@ -171,7 +179,7 @@ export class DeliveryWorker {
         // Same stable socket identity as inventory() — see the comment there.
         const socket = "herdr-core:local";
         const agents = await this.discover();
-        const agent = agents.find(a => a.socket === socket && a.directory === this.directory &&
+        const agent = agents.find(a => a.socket === socket &&
             IDENTITY_KEYS.every(key => a[key] === expected[key]));
         if (!agent || agent.machineId !== this.store.machineId ||
             agents.filter(a => a.socket === socket && (a.sessionId === agent.sessionId || a.terminalId === agent.terminalId)).length !== 1)
@@ -212,15 +220,21 @@ export class DeliveryWorker {
         const agents = await this.discover();
         if (this.stopped)
             return;
-        // The original build served the single agent bound to this server's pane.
-        // The desktop generation shares one server across panes, so the worker
-        // serves every Herdr-reported agent in its own directory. One live record
-        // per session or terminal still guards against duplicate bindings.
-        const local = agents.filter(a => a.socket === socket && a.directory === this.directory);
+        // The coordination store is machine-wide: this worker serves every
+        // Herdr-reported agent on the shared server, in every project directory —
+        // the point of the tool is coordinating agents working in different
+        // projects. Scoping to the plugin's own directory left agents in other
+        // projects queued forever. Two guards keep that safe: per-agent identity
+        // pinning in serve(), and a store lease so that with several OpenCode
+        // servers on one machine exactly one live worker acts on each agent
+        // (claiming here also renews the lease every tick).
+        const local = agents.filter(a => a.socket === socket);
         for (const agent of local) {
             if (this.stopped)
                 return;
             if (agents.filter(a => a.socket === socket && (a.sessionId === agent.sessionId || a.terminalId === agent.terminalId)).length !== 1)
+                continue;
+            if (!this.store.claimAgent(agent.id, this.owner, Date.now(), LEASE_TTL))
                 continue;
             await this.serve(agent);
         }
@@ -254,7 +268,7 @@ export class DeliveryWorker {
         }
         if (request?.messageId && request.state === "unknown") {
             await this.conversation(agent);
-            if (await this.receipt(agent.sessionId, request.messageId, requestPrompt(request)))
+            if (await this.receipt(agent, request.messageId, requestPrompt(request)))
                 this.store.submitted(request.id, request.messageId);
             return;
         }
@@ -265,9 +279,9 @@ export class DeliveryWorker {
                 const id = messageId();
                 if (this.store.attempt(request.id, request.generation, id)) {
                     const text = requestPrompt(request);
-                    await this.client.session.promptAsync({ path: { id: agent.sessionId }, query: { directory: this.directory },
+                    await this.client.session.promptAsync({ path: { id: agent.sessionId }, query: { directory: agent.directory },
                         body: { ...settings, messageID: id, parts: [{ type: "text", text }] }, signal: AbortSignal.timeout(15000), throwOnError: true });
-                    if (await this.receipt(agent.sessionId, id, text))
+                    if (await this.receipt(agent, id, text))
                         this.store.submitted(request.id, id);
                 }
             }
@@ -279,7 +293,7 @@ export class DeliveryWorker {
                 continue;
             if (notice.state === "unknown" && notice.messageId) {
                 await this.conversation(agent);
-                if (await this.receipt(agent.sessionId, notice.messageId, notice.text))
+                if (await this.receipt(agent, notice.messageId, notice.text))
                     this.store.noticeDelivered(notice.id, notice.messageId);
                 return;
             }
@@ -291,9 +305,9 @@ export class DeliveryWorker {
                 const id = messageId();
                 if (!this.store.noticeAttempt(notice.id, id))
                     return;
-                await this.client.session.promptAsync({ path: { id: agent.sessionId }, query: { directory: this.directory },
+                await this.client.session.promptAsync({ path: { id: agent.sessionId }, query: { directory: agent.directory },
                     body: { ...settings, messageID: id, parts: [{ type: "text", text: notice.text }] }, signal: AbortSignal.timeout(15000), throwOnError: true });
-                if (await this.receipt(agent.sessionId, id, notice.text))
+                if (await this.receipt(agent, id, notice.text))
                     this.store.noticeDelivered(notice.id, id);
                 break;
             }
