@@ -204,10 +204,11 @@ export default class CoordinationPanel extends View {
     this.mailboxData = null;
     this.mailboxShowAll = false;
     this.detail = null;
-    this.loadMailbox(cx);
+    this.loadMailbox();
+    cx?.notify();
   }
 
-  async loadMailbox(cx) {
+  async loadMailbox() {
     const target = this.mailbox;
     if (!target) return;
     try {
@@ -218,7 +219,8 @@ export default class CoordinationPanel extends View {
     } catch (error) {
       if (this.mailbox === target) this.mailboxData = { error: clip(String(error), 140) };
     }
-    cx?.notify();
+    // No cx.notify() here: a click's cx is invalid after the await, and async
+    // repaints come from the refresh loop — the same rule runHello follows.
   }
 
   openDetail(id, cx) {
@@ -229,17 +231,17 @@ export default class CoordinationPanel extends View {
     }
     this.detail = { id, loading: true, data: null, error: null };
     cx?.notify();
+    // Synchronous cx use only — after the exec resolves the click's cx is long
+    // invalid; the refresh loop repaints the loaded detail within its tick.
     exec("herdr", ["request", id]).then((res) => {
       if (this.detail?.id !== id) return;
       let parsed = null;
       try { parsed = JSON.parse(res.stdout || "{}")?.result; } catch {}
       if (res.code === 0 && parsed && !parsed.error) this.detail = { id, loading: false, data: parsed, error: null };
       else this.detail = { id, loading: false, data: null, error: clip(parsed?.error || (res.stderr || `exit ${res.code}`), 140) };
-      cx.notify();
     }).catch((error) => {
       if (this.detail?.id !== id) return;
       this.detail = { id, loading: false, data: null, error: clip(String(error), 140) };
-      cx.notify();
     });
   }
 
@@ -251,13 +253,16 @@ export default class CoordinationPanel extends View {
     return [...items].sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
   }
 
-  mailboxItemRow(item) {
+  mailboxItemRow(item, index) {
     const t = theme();
     const color = t[STATE_COLOR[item.state] ?? "idle"] ?? t.idle;
     const open = this.detail?.id === item.id;
     const remote = item.kind === "remote";
     const row = h_flex().gap(5).items_center().p(5).rounded(5).bg(t.canvas)
-      .id(`mail-${item.id?.slice(0, 8)}`)
+      // The mailbox legitimately contains the same request twice (the work
+      // order and its handback are two pieces of mail), so the element id must
+      // be unique per instance, not per request — gpui rejects duplicate ids.
+      .id(`mail-${index}-${item.id?.slice(0, 8)}`)
       .on_click((_e, cx) => this.openDetail(remote && item.remoteRequest ? item.remoteRequest : item.id, cx))
       .child(div().size(6).rounded(3).flex_none().bg(color))
       .child(div().text_color(t.dim).flex_none().child(clock(item.updatedAt, true)))
@@ -309,7 +314,7 @@ export default class CoordinationPanel extends View {
     return v_flex().gap(2).pt(1)
       .child(div().text_color(t.dim).child(`${target.box} · ${items.length} item${items.length === 1 ? "" : "s"} — click one for details`))
       .when(items.length === 0, (el) => el.child(div().text_color(t.dim).child("empty")))
-      .when(items.length > 0, (el) => el.children(shown.map((item) => this.safe(`mail ${item.id?.slice(0, 8)}`, () => this.mailboxItemRow(item)))))
+      .when(items.length > 0, (el) => el.children(shown.map((item, index) => this.safe(`mail ${item.id?.slice(0, 8)}`, () => this.mailboxItemRow(item, index)))))
       .when(items.length > shown.length, (el) => el.child(div().id("mail-more").text_color(t.primary)
         .on_click((_e, cx) => { this.mailboxShowAll = true; cx?.notify(); })
         .child(`show all ${items.length}`)));
