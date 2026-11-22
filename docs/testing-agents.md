@@ -111,29 +111,30 @@ Routes are **linear by design**: no agent ever receives a second leg while it
 still holds an open task, so no hop can deadlock the store's one-pending-per-
 agent queue. Intermediate holds queue and dispatch in order.
 
-## The hello test (all agents greet each other)
+## The hello test (the agent-to-agent relay)
 
-Two modes. **Flat (default)** — the origin enqueues one short, independent
-greeting per other agent; each brief is two sentences (`read_task` to accept,
-`hand_back` to acknowledge), with no verbatim copying, so any agent that can
-accept and acknowledge can complete. **Relay (`--relay`)** — the true
-agent-to-agent cascade: leg 1 is enqueued and each agent relays the next
-greeting itself (nested briefs, byte-exact copying required). The relay mode
-demands capable models — the integrity guard brands handbacks that claim a
-relay that never fired, and small models deterministically take that
-shortcut (seven consecutive catches on one pane).
+**The design**: the button starts **leg 1 only** — the origin greets the first
+agent, who relays the greeting to the next by calling `request_agent`
+themselves, and so on around the circle until the last greeting lands back on
+the origin. The cascade is the proof: **agents calling each other**, with
+every hop attested in the store.
+
+**`--flat`** is the deliberate fallback: the origin enqueues one short
+greeting per other agent (read_task + hand_back only). It proves transport,
+acceptance and handback — but the origin orchestrates, so it does *not* carry
+the agent-calls-agent proof. Use it explicitly when that's the question.
 
 ```sh
-node scripts/hello-test.mjs                # flat: reliable on any panes
-node scripts/hello-test.mjs --relay        # the cascade: capable models only
+node scripts/hello-test.mjs                # the relay cascade (the design)
+node scripts/hello-test.mjs --flat         # the fan-out fallback
 node scripts/hello-test.mjs --dry          # print the leg briefs only
 ```
 
 The Coordination panel's **Hello test** section does this with one click —
-**▶ say hello** runs the script (the mod itself never mutates the store) and
-then watches the round live: each leg appears with its state
-(`queued → submitted → accepted → completed`), the acknowledgment summaries,
-and a verdict line (`leg 2/3 in flight`, `all 3 agents greeted ✓`, or a
+**▶ say hello** starts leg 1 (the mod itself never mutates the store) and
+then watches the cascade live: each leg appears with its state
+(`queued → submitted → accepted → completed`), the handback summaries, and a
+verdict line (`leg 2/4 in flight`, `all 4 agents greeted ✓`, or a
 blocked/rejected note).
 
 Design notes:
@@ -144,9 +145,13 @@ Design notes:
   flight (the one-pending-per-agent queue would muddle both runs). It names
   the blocking legs and the cancel command; `--force` overrides. The
   **✕ cancel** button clears them in one click.
-- Flat briefs are two sentences by design — a relay that demands verbatim
-  copying of nested briefs is the hardest ask for a small model, and the
-  easiest to fake (the closing summary is right there in the text).
+- **Why relays fail on small models**: the relay demands the agent construct
+  the next leg's request — including a byte-exact copy of the nested brief —
+  and the nested text conveniently contains the *closing* summary, which is
+  the easiest thing for a shortcut-taking model to claim instead. The
+  integrity guard makes that claim `validation: "rejected"` (seven
+  consecutive catches on one pane), so the failure is honest and visible —
+  the relay needs capable agents, and the test says so rather than pretending.
 
 **Model requirements.** Each intermediate agent must copy the next leg's text
 verbatim — nested briefs grow with hop count (~600 characters for a 4-hop,
