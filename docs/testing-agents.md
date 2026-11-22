@@ -240,3 +240,22 @@ or recipient). The full trail for any request is readable via
 node scripts/cancel-request.mjs --id <requestId> --from "<your pane>"
 node scripts/watch-store.mjs        # confirm it shows cancelled
 ```
+
+## Mesh etiquette: panes belong to their humans
+
+An agent (or a test script) **never reconfigures another pane** — no model
+switches, no agent changes, no settings writes. A stalled hello leg is a
+*finding*, reported through the watch; the pane's human decides whether to
+bring in a different model. Two hard facts that make this non-negotiable:
+
+- **Session size outlives model choice.** A pane whose session has grown
+  large (e.g. 532K tokens) cannot run on a small-window local model at all —
+  every turn overflows and auto-compaction dies at its tiny output cap
+  (LFM3's 2048-token output killed a compaction that GLM would pass). Which
+  model a pane needs is dictated by its session, not by the test at hand.
+- **Switching is not restoring.** Re-applying "the model it had before"
+  after a config rename re-applies ids that no longer resolve
+  (`(unavailable)`), and mid-round switches clobber choices made in the
+  pane. The delivery adapter now respects whatever the session chose
+  (switches only when blank) — agents must extend it the same courtesy.
+
