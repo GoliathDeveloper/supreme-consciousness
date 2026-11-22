@@ -171,7 +171,7 @@ export default class CoordinationPanel extends View {
       ? div().text_color(t.blocked).child(`⚠ this conversation is open in ${agent.conflict} panes — close the duplicate; coordination pauses until then`)
       : null;
     const ambiguousLine = ambiguous
-      ? div().text_color(t.blocked).child(`⚠ ${ambiguous} sessions share this pane's directory — the binding is a guess; send the pane a first message (or remove the orphaned session) to re-resolve before coordinating`)
+      ? div().text_color(t.blocked).child(`⚠ ${agent.ambiguous} recent sessions share this pane's directory — the binding is a guess until its next turn re-binds it (or remove the orphaned session)`)
       : null;
     return v_flex().id(`agent-${pane}`).gap(4).p(8).rounded(6).bg(t.canvas)
       .on_click(() => run("agent.focus", { terminal: agent.terminal_id }))
