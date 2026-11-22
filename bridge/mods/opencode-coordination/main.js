@@ -56,6 +56,7 @@ export default class CoordinationPanel extends View {
     this.counts = {};
     this.error = null;
     this.helloStatus = null;
+    this.pluginRoot = null;
     cx.spawn(async (cx) => {
       while (true) {
         await this.refresh();
@@ -76,6 +77,10 @@ export default class CoordinationPanel extends View {
         try {
           const data = JSON.parse(raw);
           tokens[data.paneId ?? name.replace(/\.json$/, "")] = data.tokens ?? {};
+          // The plugin publishes its own install root with every metadata
+          // write — the Hello test and cancel actions run its scripts, so
+          // the buttons work wherever the plugin was installed.
+          if (data.pluginRoot) this.pluginRoot = data.pluginRoot;
         } catch {}
       }
       this.tokens = tokens;
@@ -223,7 +228,7 @@ export default class CoordinationPanel extends View {
   runHello() {
     const t = theme();
     this.helloStatus = { text: "starting hello round…", color: t.dim };
-    exec("node", [`${home()}/Projects/Herdr-A2A/scripts/hello-test.mjs`]).then((res) => {
+    exec("node", [`${this.pluginRoot ?? `${home()}/Projects/Herdr-A2A`}/scripts/hello-test.mjs`]).then((res) => {
       const lines = (res.stdout || "").split("\n").filter(Boolean);
       if (res.code === 0) {
         this.helloStatus = { text: clip(lines[1] ?? lines[0] ?? "hello round enqueued", 150), color: t.done };
@@ -241,7 +246,7 @@ export default class CoordinationPanel extends View {
   cancelHello() {
     const t = theme();
     this.helloStatus = { text: "cancelling in-flight hello legs…", color: t.dim };
-    exec("node", [`${home()}/Projects/Herdr-A2A/scripts/hello-cancel.mjs`]).then((res) => {
+    exec("node", [`${this.pluginRoot ?? `${home()}/Projects/Herdr-A2A`}/scripts/hello-cancel.mjs`]).then((res) => {
       const lines = (res.stdout || "").split("\n").filter(Boolean);
       const colour = res.code === 0 ? t.done : t.blocked;
       this.helloStatus = { text: clip(lines.find((l) => /cancelled|nothing|failed/.test(l)) ?? lines[0] ?? `exit ${res.code}`, 150), color: colour };
@@ -262,23 +267,32 @@ export default class CoordinationPanel extends View {
       ...e, n: Number(e.key.match(/-leg(\d+)$/)?.[1] ?? 0), total: Number(run.match(/^hello-/) ? legs.filter(l => l.key.startsWith(`${run}-leg`)).length : 0),
     }));
     const total = round.length;
-    // A 'completed' leg with rejected validation is a failed hop: the handback
-    // was published untrusted (a claimed relay that never fired).
+    // A round that traversed every leg DID its job — deviations are quality
+    // findings the guard caught, not failures. The verdict says both.
+    const deviations = round.filter((l) => l.state === "completed" && l.validation === "rejected");
     const completed = round.filter((l) => l.state === "completed" && l.validation !== "rejected").length;
     const inFlight = round.find((l) => PENDING.has(l.state));
-    const failed = round.find((l) => ["failed", "cancelled"].includes(l.state) || (l.state === "completed" && l.validation === "rejected"));
+    const cancelled = round.find((l) => l.state === "cancelled");
+    const failed = round.find((l) => l.state === "failed");
     // Legs 2+ exist only once earlier hops relay them, so the round's full
     // size is taken from the briefs ("leg n/N"), never from what's visible yet.
     const expected = Math.max(...round.map((l) => Number(l.brief?.match(/leg \d+\/(\d+)/)?.[1] ?? 0)), total);
-    let verdict = { text: `run ${run.replace(/^hello-/, "")}: leg ${Math.min(completed + 1, expected)}/${expected}`, color: theme().working };
-    if (completed >= expected && expected > 0) verdict = { text: `run ${run.replace(/^hello-/, "")}: all ${expected} agents greeted each other ✓`, color: theme().done };
-    else if (failed) verdict = failed.state === "cancelled"
-      ? { text: `run ${run.replace(/^hello-/, "")}: leg ${failed.n} cancelled — press ▶ for a fresh round`, color: theme().dim }
-      : failed.validation === "rejected"
-        ? { text: `run ${run.replace(/^hello-/, "")}: leg ${failed.n} handback unverified — the claimed relay never fired`, color: theme().blocked }
-        : { text: `run ${run.replace(/^hello-/, "")}: leg ${failed.n} failed — see History for the reason`, color: theme().blocked };
-    else if (inFlight) verdict = { text: `run ${run.replace(/^hello-/, "")}: leg ${inFlight.n}/${expected} in flight (${inFlight.state})`, color: theme().working };
-    return { run, legs: round, verdict };
+    const runName = run.replace(/^hello-/, "");
+    const allConcluded = expected > 0 && !inFlight && completed + deviations.length >= expected;
+    let verdict;
+    if (allConcluded && deviations.length === 0)
+      verdict = { text: `run ${runName}: all ${expected} agents greeted each other ✓`, color: theme().done };
+    else if (allConcluded)
+      verdict = { text: `run ${runName}: all ${expected} legs traversed · guard caught ${deviations.length} deviation${deviations.length > 1 ? "s" : ""} (${deviations.map(l => "leg " + l.n).join(", ")})`, color: theme().working };
+    else if (cancelled)
+      verdict = { text: `run ${runName}: leg ${cancelled.n} cancelled — press ▶ for a fresh round`, color: theme().dim };
+    else if (failed)
+      verdict = { text: `run ${runName}: leg ${failed.n} failed — see History for the reason`, color: theme().blocked };
+    else if (inFlight)
+      verdict = { text: `run ${runName}: leg ${inFlight.n}/${expected} in flight (${inFlight.state})`, color: theme().working };
+    else
+      verdict = { text: `run ${runName}: leg ${Math.min(completed + deviations.length + 1, expected)}/${expected}`, color: theme().working };
+    return { run, legs: round, verdict, deviations };
   }
 
   helloSection() {
@@ -301,14 +315,15 @@ export default class CoordinationPanel extends View {
       .child(status)
       .when(Boolean(run), (el) => el.child(div().text_color(run.verdict.color).child(run.verdict.text)))
       .when(Boolean(run), (el) => el.children(run.legs.map((leg) => {
-        const color = t[STATE_COLOR[leg.state] ?? "idle"] ?? t.idle;
+        const rejected = leg.state === "completed" && leg.validation === "rejected";
+        const color = rejected ? t.blocked : (t[STATE_COLOR[leg.state] ?? "idle"] ?? t.idle);
         return v_flex().id(`hello-${leg.id?.slice(0, 8)}`).gap(2).p(6).rounded(5).bg(t.canvas)
           .child(h_flex().gap(5).items_center()
             .child(div().size(6).rounded(3).flex_none().bg(color))
             .child(div().text_color(t.dim).flex_none().child(clock(leg.updatedAt, true)))
             .child(div().text_color(t.foreground).flex_1().child(`leg ${leg.n}: ${clip(short(leg.origin), 22)} → ${clip(short(leg.recipient), 22)}`))
-            .child(div().text_color(color).flex_none().child(leg.state)))
-          .when(Boolean(leg.summary), (row) => row.child(div().text_color(color).child(clip(`→ ${leg.summary}`, 130))));
+            .child(div().text_color(color).flex_none().child(rejected ? "completed · rejected" : leg.state)))
+          .when(Boolean(leg.summary), (row) => row.child(div().text_color(rejected ? t.blocked : color).child(clip(`→ ${leg.summary}`, 130))));
       })));
   }
 
