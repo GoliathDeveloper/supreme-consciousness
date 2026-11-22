@@ -225,6 +225,20 @@ export default class CoordinationPanel extends View {
     });
   }
 
+  // Clear every in-flight hello leg so the guard allows a fresh round. Shells
+  // out to scripts/hello-cancel.mjs — the mod never touches the store itself.
+  cancelHello() {
+    const t = theme();
+    this.helloStatus = { text: "cancelling in-flight hello legs…", color: t.dim };
+    exec("node", [`${home()}/Projects/Herdr-A2A/scripts/hello-cancel.mjs`]).then((res) => {
+      const lines = (res.stdout || "").split("\n").filter(Boolean);
+      const colour = res.code === 0 ? t.done : t.blocked;
+      this.helloStatus = { text: clip(lines.find((l) => /cancelled|nothing|failed/.test(l)) ?? lines[0] ?? `exit ${res.code}`, 150), color: colour };
+    }).catch((error) => {
+      this.helloStatus = { text: clip(`cancel failed: ${String(error).slice(0, 130)}`, 150), color: t.blocked };
+    });
+  }
+
   // Legs of the newest hello run plus a one-line verdict. Grouping key is the
   // idempotencyKey prefix "hello-<run>-leg<n>"; runs sort by their base36 stamp.
   helloRun() {
@@ -258,6 +272,9 @@ export default class CoordinationPanel extends View {
     const header = h_flex().gap(6).items_center().pt(4)
       .child(div().font_weight(600).text_color(t.foreground).child("Hello test"))
       .child(div().flex_1())
+      .child(div().id("hello-cancel").px(8).py(3).rounded(5).bg(t.canvas).text_color(t.dim)
+        .on_click(() => this.cancelHello())
+        .child("✕ cancel"))
       .child(div().id("hello-run").px(8).py(3).rounded(5).bg(t.canvas).text_color(t.foreground)
         .on_click(() => this.runHello())
         .child("▶ say hello"));
