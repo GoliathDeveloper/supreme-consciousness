@@ -339,14 +339,21 @@ async function sessionOrphans() {
   const [terms, { sessions, active }] = await Promise.all([terminals(), opencodeSessions()]);
   const bindings = loadBindings();
   const bound = new Set(Object.values(bindings));
+  const unverifiedDirectories = new Set<string>();
   for (const term of terms.filter(isAgentPane)) {
     const candidates = term.directory ? sessions.filter(s => s.directory === term.directory) : [];
     if (!candidates.length) continue;
-    const { picked } = resolvePaneSession(term, candidates, active, bindings);
+    const { picked, ambiguous } = resolvePaneSession(term, candidates, active, bindings);
+    // Deletion safety: a pane whose binding is a recency guess makes every
+    // session in its directory unverified — a wrong guess here once listed a
+    // live pane session as an orphan. Only authoritative bindings (sticky,
+    // title, running) may classify sessions as deletable.
+    if (picked && ambiguous > 1) { unverifiedDirectories.add(term.directory); continue; }
     if (picked) bound.add(picked.id);
+    else unverifiedDirectories.add(term.directory);
   }
   const orphans = sessions
-    .filter(s => !bound.has(s.id))
+    .filter(s => !bound.has(s.id) && !(s.directory && unverifiedDirectories.has(s.directory)))
     .map(s => ({
       id: s.id,
       title: s.title ?? null,
@@ -355,7 +362,11 @@ async function sessionOrphans() {
       running: active[s.id]?.type === 'running' ?? false,
     }))
     .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-  return { result: { orphans, count: orphans.length } };
+  const unverified = sessions
+    .filter(s => s.directory && unverifiedDirectories.has(s.directory) && !bound.has(s.id))
+    .map(s => ({ id: s.id, title: s.title ?? null, directory: s.directory ?? null, updatedAt: s.updatedAt ?? null }))
+    .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  return { result: { orphans, count: orphans.length, unverified, unverifiedCount: unverified.length } };
 }
 
 // ——— herdr review ———————————————————————————————————————————————————————————
