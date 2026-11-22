@@ -240,10 +240,15 @@ export default class CoordinationPanel extends View {
     const completed = round.filter((l) => l.state === "completed").length;
     const inFlight = round.find((l) => PENDING.has(l.state));
     const failed = round.find((l) => ["failed", "cancelled"].includes(l.state));
-    let verdict = { text: `run ${run.replace(/^hello-/, "")}: leg ${Math.min(completed + 1, total)}/${total}`, color: theme().working };
-    if (total > 0 && completed === total) verdict = { text: `run ${run.replace(/^hello-/, "")}: all ${total} agents greeted each other ✓`, color: theme().done };
-    else if (failed) verdict = { text: `run ${run.replace(/^hello-/, "")}: leg ${failed.n} ${failed.state} — cancel it to unblock the round`, color: theme().blocked };
-    else if (inFlight) verdict = { text: `run ${run.replace(/^hello-/, "")}: leg ${inFlight.n}/${total} in flight (${inFlight.state})`, color: theme().working };
+    // Legs 2+ exist only once earlier hops relay them, so the round's full
+    // size is taken from the briefs ("leg n/N"), never from what's visible yet.
+    const expected = Math.max(...round.map((l) => Number(l.brief?.match(/leg \d+\/(\d+)/)?.[1] ?? 0)), total);
+    let verdict = { text: `run ${run.replace(/^hello-/, "")}: leg ${Math.min(completed + 1, expected)}/${expected}`, color: theme().working };
+    if (completed >= expected && expected > 0) verdict = { text: `run ${run.replace(/^hello-/, "")}: all ${expected} agents greeted each other ✓`, color: theme().done };
+    else if (failed) verdict = failed.state === "cancelled"
+      ? { text: `run ${run.replace(/^hello-/, "")}: leg ${failed.n} cancelled — press ▶ for a fresh round`, color: theme().dim }
+      : { text: `run ${run.replace(/^hello-/, "")}: leg ${failed.n} failed — see History for the reason`, color: theme().blocked };
+    else if (inFlight) verdict = { text: `run ${run.replace(/^hello-/, "")}: leg ${inFlight.n}/${expected} in flight (${inFlight.state})`, color: theme().working };
     return { run, legs: round, verdict };
   }
 

@@ -188,6 +188,16 @@ Real-world note: long-lived panes (900+ messages, compaction churn) are
 call. For self-tests, open a **fresh tab** for the test agent, wait for it to
 appear in `herdr agent list`, and send the test there.
 
+**Recipient loops on misfired tool calls.** A distinct 1.7B-class failure:
+the model *intends* to call `read_task` but the harness executes `read` with
+`path: ""` over and over — its own reasoning says "I need to issue the
+read_task call directly" while every emitted call maps to the wrong tool.
+The request stays `submitted` while the pane burns turns. This is a tool-
+emission capability limit, not a pipeline fault: the same briefs complete on
+capable models. Remedy: switch the relay panes to a stronger model (e.g.
+`openrouter/z-ai/glm-5.3-flash`, or start LM Studio for
+`qwen2.5-coder-14b-instruct`), cancel the stuck leg, and press ▶ again.
+
 **Your second request shows `queued`.** The store allows **one pending request
 per agent**; a stalled head blocks everything else to that pane. Cancel the
 head (above) and the queued request delivers within seconds. Short request ids
