@@ -155,6 +155,17 @@ node scripts/cancel-request.mjs --id <requestId> --from "Herdr-A2A"
 #    accept reliably.
 ```
 
+Real-world note: long-lived panes (900+ messages, compaction churn) are
+**unreliable actors regardless of model** — their turns end without the tool
+call. For self-tests, open a **fresh tab** for the test agent, wait for it to
+appear in `herdr agent list`, and send the test there.
+
+**Your second request shows `queued`.** The store allows **one pending request
+per agent**; a stalled head blocks everything else to that pane. Cancel the
+head (above) and the queued request delivers within seconds. Short request ids
+(8 characters, as shown by `watch-store`) work everywhere — scripts resolve
+them to the full id for you.
+
 **Free OpenRouter models 429.** Daily free-tier limit — use local models
 (`llama-local/lfm3-opencode`) or a paid model for the test window.
 
