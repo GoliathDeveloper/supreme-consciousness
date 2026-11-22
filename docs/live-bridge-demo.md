@@ -81,3 +81,23 @@ request_agent identity=<id> kind=task idempotencyKey=<fresh-key> text="…"
 
 Inspect everything afterwards with `inspect_request requestId=…` (own requests)
 or read the store directly: `~/.config/opencode/opencode-herdr/coordination.sqlite`.
+
+## 2026-11-22 10:05 — first full mesh round: all four agents greeted each other
+
+`node scripts/hello-test.mjs` (run `ro7mnk`), origin `herdr-app GUI compatibility`,
+route origin → arcadedb → myenergi → ICM → origin. Every hop executed by the
+agent itself: `read_task` accept → `request_agent` relay → `hand_back` summary.
+
+| leg | request | trail | handback summary |
+|---|---|---|---|
+| 1 | `37afe7b7…` | enqueue 10:04:58 → accept 10:05:22 → completed 10:06:13 | "OpenCode plugin for arcade greeted Secret keys in this repo" |
+| 2 | `64736c8d…` | enqueued by arcadedb, accepted 10:06:28 → completed 10:06:44 | "Secret keys in this repo greeted Intelligent context manage" |
+| 3 | `ff7cbac9…` | enqueued by myenergi, accepted → completed 10:08:57 | "Intelligent context manage greeted herdr-app GUI compatibilit" |
+| 4 | `06b8089f…` | enqueued by ICM, delivered to the origin pane 10:09:54; the origin's own agent called read_task + hand_back | "greeted herdr-app GUI compatibilit back — all 4 agents said hello" |
+
+Notes from the run: the three relay panes were switched to a capable model for
+the round (LFM3 1.7B fails at tool-call emission, see testing-agents.md) and
+restored to `llama-local` immediately after — the switch is one API call per
+session, fully reversible. The origin's final leg was handled by its own agent
+inside its normal conversation, proving the "any agent can be called" property
+end to end.
