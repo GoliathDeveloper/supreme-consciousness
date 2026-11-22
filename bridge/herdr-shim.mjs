@@ -339,7 +339,7 @@ async function sessionOrphans() {
   const [terms, { sessions, active }] = await Promise.all([terminals(), opencodeSessions()]);
   const bindings = loadBindings();
   const bound = new Set(Object.values(bindings));
-  const unverifiedDirectories = new Set<string>();
+  const unverifiedDirectories = new Set();
   for (const term of terms.filter(isAgentPane)) {
     const candidates = term.directory ? sessions.filter(s => s.directory === term.directory) : [];
     if (!candidates.length) continue;
