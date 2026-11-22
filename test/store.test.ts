@@ -27,7 +27,7 @@ function open(path: string): Store {
 }
 function observe(store: Store, overrides: Partial<Agent> = {}): Agent {
   return store.observeAgent({
-    sessionId: 'recipient', socket: '/tmp/opencode.sock', paneId: 'pane', terminalId: 'terminal',
+    sessionId: 'recipient', socket: 'herdr-core:local', paneId: 'pane', terminalId: 'terminal',
     workspaceId: 'workspace', directory: '/project', label: 'Worker', state: 'idle', lastSeen: Date.now(), ...overrides,
   })
 }

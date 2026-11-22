@@ -57,7 +57,10 @@ export class Provisioner {
     context() {
         if (this.env.HERDR_ENV !== '1')
             throw new Error('Provisioning requires a local herdr pane');
-        return { socket: absolute(this.env.HERDR_SOCKET_PATH), callerPane: text(this.env.HERDR_PANE_ID) };
+        // Same stable socket identity as inventory() — provisioned bindings must
+        // match the serving workers' observations regardless of which process
+        // (service, mod-exec'd script) performed the provisioning.
+        return { socket: 'herdr-core:local', callerPane: text(this.env.HERDR_PANE_ID) };
     }
     async command(file, args, cwd, signal, env = this.env) {
         const output = await this.run(file, args, { encoding: 'utf8', timeout: 15_000, maxBuffer: 4 * 1024 * 1024, env, ...(cwd ? { cwd } : {}), ...(signal ? { signal } : {}) });

@@ -21,11 +21,14 @@ export const requestPrompt = (r: Request) => `[opencode-herdr request ${r.id} ge
 export async function inventory(store: Store, env: NodeJS.ProcessEnv = process.env,
   runner: (file: string, args: string[], options: { timeout: number; maxBuffer: number; env: NodeJS.ProcessEnv }) => Promise<{ stdout: string; stderr: string }> = run): Promise<Agent[]> {
   // The TUI generation set HERDR_ENV/HERDR_SOCKET_PATH in every pane. The
-  // desktop generation's shared server daemons inherit neither; there the
-  // shim itself is the Herdr signal and the socket identity falls back to a
-  // stable symbolic value so pinned bindings survive restarts.
+  // desktop generation's shared server daemons inherit neither — and processes
+  // that do inherit them (service vs mod-exec'd scripts) must never disagree:
+  // the socket is part of the binding identity, and a per-env value made every
+  // button-launched script pin a different binding than the serving worker.
+  // The shim itself is the Herdr signal here, so the socket identity is one
+  // stable symbolic value for every process in this generation.
   if (env.HERDR_ENV !== undefined && env.HERDR_ENV !== "1") return [];
-  const socket = env.HERDR_SOCKET_PATH || "herdr-core:local";
+  const socket = "herdr-core:local";
   const response = await runner("herdr", ["agent", "list"], { timeout: 5000, maxBuffer: 4 * 1024 * 1024, env }).catch(() => null);
   if (!response) return [];
   const panes = JSON.parse(response.stdout).result?.agents;
@@ -133,7 +136,8 @@ export class DeliveryWorker {
   }
   private async live(expected: Agent): Promise<Agent | undefined> {
     if (this.stopped || (process.env.HERDR_ENV !== undefined && process.env.HERDR_ENV !== "1")) return;
-    const socket = process.env.HERDR_SOCKET_PATH || "herdr-core:local";
+    // Same stable socket identity as inventory() — see the comment there.
+    const socket = "herdr-core:local";
     const agents = await this.discover();
     const agent = agents.find(a => a.socket === socket && a.directory === this.directory &&
       IDENTITY_KEYS.every(key => a[key as keyof Agent] === expected[key as keyof Agent]));
@@ -156,7 +160,8 @@ export class DeliveryWorker {
   }
   private async scan() {
     if (process.env.HERDR_ENV !== undefined && process.env.HERDR_ENV !== "1") return;
-    const socket = process.env.HERDR_SOCKET_PATH || "herdr-core:local";
+    // Same stable socket identity as inventory() — see the comment there.
+    const socket = "herdr-core:local";
     const agents = await this.discover();
     if (this.stopped) return;
     // The original build served the single agent bound to this server's pane.

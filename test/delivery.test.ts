@@ -43,7 +43,7 @@ function fixture() {
   directories.push(directory)
   const path = join(directory, 'coordination.sqlite')
   const store = open(path)
-  const agent = store.observeAgent({ sessionId: 'recipient', socket: '/tmp/delivery-test.sock', paneId: 'pane',
+  const agent = store.observeAgent({ sessionId: 'recipient', socket: 'herdr-core:local', paneId: 'pane',
     terminalId: 'terminal', workspaceId: 'workspace', directory: '/project', label: 'Not a persona',
     state: 'idle', lastSeen: Date.now() })
   const runtime: Record<string, unknown> = { id: agent.sessionId, directory: agent.directory,
@@ -267,13 +267,31 @@ test('cancellation during preflight prevents the claim and leaves notices pendin
   expect(f.store.notices()[0].state).toBe('pending')
 })
 
-test.each(['HERDR_ENV', 'HERDR_SOCKET_PATH'])('requires the current process %s binding', async key => {
+test('the worker serves regardless of socket env; the HERDR_ENV gate still binds', async () => {
   const f = fixture()
   f.enqueue()
-  process.env[key] = 'different'
-  await f.worker().tick()
-  expect(f.session.promptAsync).not.toHaveBeenCalled()
-  expect(f.publish).not.toHaveBeenCalled()
+  const saved = process.env.HERDR_SOCKET_PATH
+  process.env.HERDR_SOCKET_PATH = 'different'
+  try {
+    // Socket identity is normalised: the serving worker and any pinning
+    // process agree regardless of environment (the button-vs-terminal bug).
+    await f.worker().tick()
+    expect(f.session.promptAsync).toHaveBeenCalledTimes(1)
+  } finally {
+    if (saved === undefined) delete process.env.HERDR_SOCKET_PATH
+    else process.env.HERDR_SOCKET_PATH = saved
+  }
+  const savedGate = process.env.HERDR_ENV
+  delete process.env.HERDR_ENV
+  try {
+    const second = f.enqueue()
+    await f.worker().tick()
+    expect(f.session.promptAsync).toHaveBeenCalledTimes(1)
+    expect(f.store.request(second.id).state).toBe('queued')
+  } finally {
+    if (savedGate === undefined) delete process.env.HERDR_ENV
+    else process.env.HERDR_ENV = savedGate
+  }
 })
 
 // The desktop generation shares one OpenCode server across panes, so a single

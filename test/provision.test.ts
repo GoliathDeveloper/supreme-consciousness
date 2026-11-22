@@ -450,7 +450,7 @@ async function realFixture() {
   expect(opened.state).toBe('launching')
   f.visible(true)
   const binding = {
-    sessionId: 'child-session', socket: f.env.HERDR_SOCKET_PATH, paneId: f.live.pane_id,
+    sessionId: 'child-session', socket: 'herdr-core:local', paneId: f.live.pane_id,
     terminalId: f.live.terminal_id, workspaceId: f.live.workspace_id, directory: f.folder,
     label: opened.result!.label as string, state: 'idle', lastSeen: Date.now(),
     management: 'managed' as const, managerSessionId: 'origin',

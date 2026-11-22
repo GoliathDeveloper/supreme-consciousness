@@ -167,7 +167,7 @@ export default Plugin.define({
             reconciliation = (async () => {
                 const live = await inventory(store);
                 for (const agent of live)
-                    if (agent.socket === process.env.HERDR_SOCKET_PATH && agent.paneId === process.env.HERDR_PANE_ID && agent.directory === directory)
+                    if (agent.paneId === process.env.HERDR_PANE_ID && agent.directory === directory)
                         origins.add(agent.sessionId);
                 for (const origin of origins) {
                     await provisioner.reconcile(origin);

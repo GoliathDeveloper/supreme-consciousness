@@ -41,7 +41,7 @@ function database(name: string) {
 
 // Match the delivery fixture's runtime settings and exact message readback contract.
 function host(store: Store, name: string) {
-  const agent = store.observeAgent({ sessionId: name, socket: `/fake/${name}.sock`, paneId: `${name}-pane`,
+  const agent = store.observeAgent({ sessionId: name, socket: 'herdr-core:local', paneId: `${name}-pane`,
     terminalId: `${name}-terminal`, workspaceId: 'workspace', directory: `/project/${name}`,
     label: name, state: 'idle', lastSeen: Date.now() })
   type Prompt = { path: { id: string }; query: { directory: string }; body: {

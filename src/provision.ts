@@ -70,7 +70,10 @@ export class Provisioner {
 
   private context(): { socket: string; callerPane: string } {
     if (this.env.HERDR_ENV !== '1') throw new Error('Provisioning requires a local herdr pane')
-    return { socket: absolute(this.env.HERDR_SOCKET_PATH), callerPane: text(this.env.HERDR_PANE_ID) }
+    // Same stable socket identity as inventory() — provisioned bindings must
+    // match the serving workers' observations regardless of which process
+    // (service, mod-exec'd script) performed the provisioning.
+    return { socket: 'herdr-core:local', callerPane: text(this.env.HERDR_PANE_ID) }
   }
 
   private async command(file: string, args: string[], cwd?: string, signal?: AbortSignal, env = this.env): Promise<string> {
