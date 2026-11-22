@@ -6,6 +6,7 @@ import type { PluginInput } from '@opencode-ai/plugin'
 import { DeliveryWorker, requestPrompt } from '../src/delivery.js'
 import type { Notice, Request } from '../src/model.js'
 import { handleRequest, remoteOutbox, remoteSession, RemoteTransport, type RemoteRunner } from '../src/remote.js'
+import { promisedRelayKeys, verifyRelay } from '../src/verify.js'
 import { Store } from '../src/store.js'
 
 const workers: DeliveryWorker[] = []
@@ -312,4 +313,36 @@ test.each([false, true])('late outcome after cancellation preserves history and 
   expect(outbox).toMatchObject([{ id: request.id, state: 'cancelled', mayContinue: true }])
   await f.recipient.tick()
   expect(f.recipient.session.promptAsync).toHaveBeenCalledTimes(1)
+})
+
+test('relay integrity: a completed handback is rejected when its promised relay never fired', async () => {
+  const f = fixture()
+  const request = f.sender.enqueue({
+    ...f.input, idempotencyKey: 'relay-src',
+    text: 'Relay onward: request_agent identity "abc" kind task key "hello-x-leg2" with EXACTLY this text: "nested brief mentioning key \\"hello-x-leg3\\" deeper inside"',
+  })
+  // Only the direct relay instruction is the agent's promise — the nested
+  // brief travels JSON-escaped and binds nobody at this hop.
+  expect(promisedRelayKeys(request.text)).toEqual(['hello-x-leg2'])
+  await f.recipient.tick()
+  f.recipient.acceptPrompt(request)
+  const missing = verifyRelay(f.sender.request(request.id).text, key => f.sender.byKey(key))
+  expect(missing).toEqual(['hello-x-leg2'])
+  f.receiver.finish(request.id, request.generation, f.recipient.agent.sessionId,
+    { outcome: 'completed', summary: 'leg 4/4: all agents said hello', checks: [], risks: [], validation: 'rejected' })
+  expect(f.sender.request(request.id)).toMatchObject({ state: 'completed', validation: 'rejected' })
+  // Once the promised request exists, the same brief verifies clean.
+  f.sender.enqueue({ ...f.input, idempotencyKey: 'hello-x-leg2', text: 'the promised leg' })
+  expect(verifyRelay(f.sender.request(request.id).text, key => f.sender.byKey(key))).toEqual([])
+})
+
+test('relay integrity: an agent cannot self-approve its validation', () => {
+  const f = fixture()
+  const request = f.sender.enqueue({ ...f.input, idempotencyKey: 'self-approve' })
+  f.sender.attempt(request.id, request.generation, 'fixture-message')
+  f.sender.submitted(request.id, 'fixture-message')
+  f.sender.accept(request.id, request.generation, request.deliveryId, f.recipient.agent.sessionId)
+  expect(() => f.receiver.finish(request.id, request.generation, f.recipient.agent.sessionId,
+    { outcome: 'completed', summary: 'trust me', checks: [], risks: [], validation: 'approved' as never }),
+  ).toThrow('Outcome validation may only be rejected')
 })

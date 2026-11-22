@@ -55,14 +55,17 @@ export type Outcome = {
   checks: string[]
   risks: string[]
   evidence?: string[]
+  /** Publishes the result as untrusted. The caller may only tighten: the store
+   *  accepts 'rejected' and nothing else — an agent cannot self-approve. */
+  validation?: 'rejected'
 }
 
-export type TaskResult = Required<Outcome> & {
+export type TaskResult = Omit<Required<Outcome>, 'validation'> & {
   requestId: string
   generation: number
   sessionId: string
   createdAt: number
-  validation: 'not_required' | 'pending'
+  validation: 'not_required' | 'pending' | 'rejected'
 }
 
 export type Question = {

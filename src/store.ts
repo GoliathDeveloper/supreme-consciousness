@@ -158,7 +158,7 @@ CREATE TABLE results (
   outcome TEXT NOT NULL CHECK(outcome IN ('completed','paused','failed')),
   summary TEXT NOT NULL, checks TEXT NOT NULL CHECK(json_valid(checks)),
   risks TEXT NOT NULL CHECK(json_valid(risks)), evidence TEXT NOT NULL CHECK(json_valid(evidence)),
-  validation TEXT NOT NULL CHECK(validation IN ('pending','not_required')),
+  validation TEXT NOT NULL CHECK(validation IN ('pending','not_required','rejected')),
   createdAt INTEGER NOT NULL, PRIMARY KEY(requestId, generation),
   FOREIGN KEY(requestId, generation) REFERENCES generations(requestId, generation)
 ) STRICT;
@@ -204,7 +204,7 @@ CREATE TRIGGER generations_immutable BEFORE UPDATE ON generations BEGIN
   SELECT RAISE(ABORT, 'Generation briefs are immutable'); END;
 CREATE TRIGGER results_immutable BEFORE UPDATE ON results BEGIN
   SELECT RAISE(ABORT, 'Results are immutable'); END;
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 `
 
 const projection = `SELECT r.*, g.text, d.sequence, d.id AS deliveryId,
@@ -287,10 +287,30 @@ export class Store {
       this.db.exec('PRAGMA busy_timeout=1000; PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;')
       this.atomic(() => {
         const version = number(this.one('PRAGMA user_version').user_version, 'schema version')
-        if (version > 1) throw new Error(`Unsupported coordination schema version ${version}; supported version is 1`)
+        if (version > 2) throw new Error(`Unsupported coordination schema version ${version}; supported version is 2`)
         if (version === 0) {
           this.db.exec(schema)
           this.run('INSERT INTO metadata(key,value) VALUES (?,?)', 'machineId', randomUUID())
+        }
+        if (version === 1) {
+          // v2: results.validation gains 'rejected' (relay integrity — a
+          // completed handback whose promised relay never fired). SQLite
+          // cannot alter a CHECK constraint in place; rebuild the table.
+          this.db.exec(`CREATE TABLE results_v2 (
+            requestId TEXT NOT NULL, generation INTEGER NOT NULL, sessionId TEXT NOT NULL,
+            outcome TEXT NOT NULL CHECK(outcome IN ('completed','paused','failed')),
+            summary TEXT NOT NULL, checks TEXT NOT NULL CHECK(json_valid(checks)),
+            risks TEXT NOT NULL CHECK(json_valid(risks)), evidence TEXT NOT NULL CHECK(json_valid(evidence)),
+            validation TEXT NOT NULL CHECK(validation IN ('pending','not_required','rejected')),
+            createdAt INTEGER NOT NULL, PRIMARY KEY(requestId, generation),
+            FOREIGN KEY(requestId, generation) REFERENCES generations(requestId, generation)
+          ) STRICT;
+            INSERT INTO results_v2 SELECT * FROM results;
+            DROP TABLE results;
+            ALTER TABLE results_v2 RENAME TO results;
+            CREATE TRIGGER results_immutable BEFORE UPDATE ON results BEGIN
+              SELECT RAISE(ABORT, 'Results are immutable'); END;
+            PRAGMA user_version = 2;`)
         }
       })
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;')
@@ -451,11 +471,19 @@ export class Store {
       result.mayContinue = r.mayContinue === 1
     }
     if (r.summary !== null) result.summary = text(r.summary, 'summary')
-    if (r.validation !== null) result.validation = choice(r.validation, ['pending', 'not_required'], 'validation')
+    if (r.validation !== null) result.validation = choice(r.validation, ['pending', 'not_required', 'rejected'], 'validation')
     return result
   }
 
   request(id: string): Request { return this.readRequest(this.one(`${projection} WHERE r.id=?`, text(id, 'request ID'))) }
+
+  /** Look up any request by idempotency key — relay verification needs a
+   *  global view: the promised request is created by another session. */
+  byKey(idempotencyKey: string): Request | undefined {
+    text(idempotencyKey, 'idempotencyKey')
+    const rows = this.snapshot(() => this.all(`${projection} WHERE r.idempotencyKey=? ORDER BY r.createdAt DESC LIMIT 1`, idempotencyKey).map(row => this.readRequest(row)))
+    return rows[0]
+  }
 
   list(sessionId: string): { inbox: Request[]; outbox: Request[] } {
     text(sessionId, 'session ID')
@@ -535,6 +563,9 @@ export class Store {
       summary: text(outcome.summary, 'summary'), checks: strings(outcome.checks, 'checks'),
       risks: strings(outcome.risks, 'risks'), evidence: strings(outcome.evidence ?? [], 'evidence'),
     }
+    // An agent may only tighten its own result: 'rejected' (untrusted) is the
+    // sole caller-supplied validation, never an approval.
+    if (outcome.validation !== undefined && outcome.validation !== 'rejected') throw new Error('Outcome validation may only be rejected')
     return this.atomic(() => {
       const request = this.request(id)
       this.recipient(request, generation, sessionId)
@@ -547,7 +578,8 @@ export class Store {
       }
       if (this.one('SELECT state FROM deliveries WHERE id=?', request.deliveryId).state !== 'accepted') throw new Error('Task must be accepted before handback')
       const now = Date.now()
-      const validation = request.executionPolicy === 'code_change' ? 'pending' : 'not_required'
+      const validation = outcome.validation === 'rejected' ? 'rejected'
+        : request.executionPolicy === 'code_change' ? 'pending' : 'not_required'
       this.run('INSERT INTO results VALUES (?,?,?,?,?,?,?,?,?,?)', id, generation, sessionId, payload.outcome, payload.summary,
         JSON.stringify(payload.checks), JSON.stringify(payload.risks), JSON.stringify(payload.evidence), validation, now)
       this.touchRequest(id)

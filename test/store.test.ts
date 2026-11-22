@@ -430,7 +430,7 @@ describe('schema and operation checkpoints', () => {
     const { path, store, agent } = fixture()
     const db = new Database(path)
     try {
-      expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 1 })
+      expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 2 })
       expect(db.query('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' })
       // These pragmas are connection-local. Inspect the actual store connection.
       const connection = (store as unknown as { db: Database }).db
@@ -457,6 +457,34 @@ describe('schema and operation checkpoints', () => {
       expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 99 })
       expect(db.query('SELECT * FROM agents').all()).toHaveLength(1)
     } finally { db.close() }
+  })
+
+  test('v1 results migrate to v2: rows preserved, rejected validation accepted', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'herdr-v1-'))
+    const path = join(dir, 'coordination.sqlite')
+    try {
+      const v1 = new Database(path)
+      // A minimal version-1 database: the old results CHECK without 'rejected',
+      // plus the metadata row the constructor requires.
+      v1.exec(`CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
+        CREATE TABLE generations (requestId TEXT NOT NULL, generation INTEGER NOT NULL CHECK(generation > 0), text TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, PRIMARY KEY(requestId, generation)) STRICT;
+        CREATE TABLE results (requestId TEXT NOT NULL, generation INTEGER NOT NULL, sessionId TEXT NOT NULL, outcome TEXT NOT NULL CHECK(outcome IN ('completed','paused','failed')), summary TEXT NOT NULL, checks TEXT NOT NULL CHECK(json_valid(checks)), risks TEXT NOT NULL CHECK(json_valid(risks)), evidence TEXT NOT NULL CHECK(json_valid(evidence)), validation TEXT NOT NULL CHECK(validation IN ('pending','not_required')), createdAt INTEGER NOT NULL, PRIMARY KEY(requestId, generation)) STRICT;
+        PRAGMA user_version = 1;`)
+      v1.exec("INSERT INTO metadata VALUES ('machineId', 'a3b8f9c0-1234-4abc-8def-123456789abc')")
+      v1.exec("INSERT INTO generations VALUES ('req-1', 1, 'brief', 1, 1)")
+      v1.exec("INSERT INTO results VALUES ('req-1', 1, 'ses', 'completed', 'summary', '[]', '[]', '[]', 'not_required', 1)")
+      v1.close()
+      const store = new Store(path)
+      store.close()
+      const after = new Database(path)
+      try {
+        expect(after.query('PRAGMA user_version').get()).toEqual({ user_version: 2 })
+        expect(after.query('SELECT summary FROM results').all()).toEqual([{ summary: 'summary' }])
+        // The rebuilt CHECK accepts the new validation value.
+        after.exec("INSERT INTO generations VALUES ('req-2', 1, 'brief', 1, 1)")
+        expect(() => after.exec("INSERT INTO results VALUES ('req-2', 1, 'ses', 'completed', 's', '[]', '[]', '[]', 'rejected', 2)")).not.toThrow()
+      } finally { after.close() }
+    } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
   test('corrupt files and malformed persisted records are not reset or swallowed', () => {

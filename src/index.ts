@@ -4,6 +4,8 @@ import { Store } from "./store.js";
 import { DeliveryWorker, inventory, requestPrompt } from "./delivery.js";
 import { Provisioner } from "./provision.js";
 import { readRemoteConfig, RemoteTransport, remoteOutbox, type RemotePeer } from "./remote.js";
+import { verifyRelay } from "./verify.js";
+import type { Outcome } from "./model.js";
 
 // OpenCode V2 plugin. The coordination semantics (Store, DeliveryWorker,
 // Provisioner, RemoteTransport) are runtime-agnostic; this file is the only
@@ -270,7 +272,19 @@ export default Plugin.define({
         input: { type: "object", properties: { requestId: text, generation: integer, outcome: enumerable("completed", "paused", "failed"), summary: text, checks: strings, risks: strings, evidence: strings }, required: ["requestId", "generation", "outcome", "summary"], additionalProperties: false },
         async execute(input: { requestId: string; generation: number; outcome: "completed" | "paused" | "failed"; summary: string; checks?: string[]; risks?: string[]; evidence?: string[] }, context: ExecuteContext) {
           await caller(context.sessionID);
-          const outcome = { outcome: input.outcome, summary: input.summary, checks: input.checks ?? [], risks: input.risks ?? [], evidence: input.evidence ?? [] };
+          const outcome: Outcome = { outcome: input.outcome, summary: input.summary, checks: input.checks ?? [], risks: input.risks ?? [], evidence: input.evidence ?? [] };
+          // Relay integrity: a completed handback whose brief promised a relay
+          // (request_agent with an idempotency key) is untrusted when the
+          // promised request was never created — publish it rejected rather
+          // than trust the prose (a leg once announced "all 4 agents said
+          // hello" while legs 2-4 had never been created).
+          if (input.outcome === "completed") {
+            const missing = verifyRelay(store.request(input.requestId).text, key => store.byKey(key));
+            if (missing.length) {
+              outcome.validation = "rejected";
+              outcome.risks = [...outcome.risks, `Promised relay request(s) not created: ${missing.join(", ")} — the handback summary is unverified`];
+            }
+          }
           return { content: json(store.finish(input.requestId, input.generation, context.sessionID, outcome)) };
         },
       }));

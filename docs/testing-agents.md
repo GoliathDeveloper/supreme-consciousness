@@ -198,6 +198,18 @@ capable models. Remedy: switch the relay panes to a stronger model (e.g.
 `openrouter/z-ai/glm-5.3-flash`, or start LM Studio for
 `qwen2.5-coder-14b-instruct`), cancel the stuck leg, and press ▶ again.
 
+**Hallucinated handback (structurally rejected).** A leg once handbacked
+"leg 4/4: all 4 agents said hello — all 4 agents greeted each other" while
+legs 2–4 had never been created: the summary was prose, and nothing verified
+it. The protocol now does. A brief that instructs a relay (`request_agent
+… key "K"`) makes the agent promise request K exists — `hand_back` verifies
+that and publishes the result with `validation: "rejected"` plus a risk
+naming the missing relay when the promise is unmet. History renders it as
+"Validation rejected" and the completion notice carries the risk. Only the
+*direct* instruction counts (nested relay briefs travel JSON-escaped inside
+the text and bind nobody at that hop), and an agent can never self-approve:
+`rejected` is the sole caller-supplied validation value.
+
 **Your second request shows `queued`.** The store allows **one pending request
 per agent**; a stalled head blocks everything else to that pane. Cancel the
 head (above) and the queued request delivers within seconds. Short request ids
