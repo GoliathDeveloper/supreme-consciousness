@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 // Flat palette the TUI projections speak. The V2 TUI theme resolves nested
 // semantic tokens whose paths vary across releases, so the TUI entry maps
@@ -80,6 +81,11 @@ export function queueTokens({ inbox, outbox }: QueueProjection): Record<"herdr_i
 
 type Runner = (file: string, args: string[], options: { timeout: number }) => Promise<unknown>;
 
+/** The plugin root, published with every metadata write so the Coordination
+ *  panel's actions (hello test, cancel) can locate the scripts that ship with
+ *  this plugin — any install path, any machine, any process environment. */
+export const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
+
 /** Call from the host's poll loop. Unchanged tokens refresh after 10 seconds. */
 export function createSidebarPublisher(run: Runner = promisify(execFile)) {
   const published = new Map<string, { sessionId: string; tokens: string; at: number }>();
@@ -96,6 +102,7 @@ export function createSidebarPublisher(run: Runner = promisify(execFile)) {
         "pane", "report-metadata", paneId,
         "--source", "opencode-herdr", "--agent", "opencode",
         "--applies-to-source", "herdr:opencode", "--ttl-ms", "30000",
+        "--plugin-root", pluginRoot,
         ...Object.entries(tokens).flatMap(([name, value]) => ["--token", `${name}=${value}`]),
       ], { timeout: 2_000 });
       published.set(paneId, { sessionId, tokens: serialised, at: Date.now() });

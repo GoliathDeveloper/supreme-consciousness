@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 export function requestPresentation(request) {
     const validation = typeof request.validation === "object" && request.validation !== null && "status" in request.validation
         ? request.validation.status : request.validation;
@@ -32,6 +33,10 @@ export function queueTokens({ inbox, outbox }) {
     const waiting = outbox.filter((request) => request.kind === "task" && request.state === "accepted");
     return { herdr_inbox: token(inbox), herdr_outbox: token(outbox), herdr_wait: token(waiting) };
 }
+/** The plugin root, published with every metadata write so the Coordination
+ *  panel's actions (hello test, cancel) can locate the scripts that ship with
+ *  this plugin — any install path, any machine, any process environment. */
+export const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
 /** Call from the host's poll loop. Unchanged tokens refresh after 10 seconds. */
 export function createSidebarPublisher(run = promisify(execFile)) {
     const published = new Map();
@@ -50,6 +55,7 @@ export function createSidebarPublisher(run = promisify(execFile)) {
                 "pane", "report-metadata", paneId,
                 "--source", "opencode-herdr", "--agent", "opencode",
                 "--applies-to-source", "herdr:opencode", "--ttl-ms", "30000",
+                "--plugin-root", pluginRoot,
                 ...Object.entries(tokens).flatMap(([name, value]) => ["--token", `${name}=${value}`]),
             ], { timeout: 2_000 });
             published.set(paneId, { sessionId, tokens: serialised, at: Date.now() });
