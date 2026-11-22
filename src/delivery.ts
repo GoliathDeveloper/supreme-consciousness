@@ -154,7 +154,16 @@ export class DeliveryWorker {
   tick(): Promise<void> {
     if (this.stopped) return Promise.resolve();
     if (this.active) return this.active;
-    this.active = this.scan().catch(() => this.report())
+    // A hung client call inside scan() must not freeze the worker forever:
+    // the guard releases after 45 seconds so the next tick can run (attempts
+    // are claimed atomically, so overlap is safe). The abandoned scan's own
+    // rejection is swallowed — it reported through report() if it failed.
+    const scanning = this.scan();
+    scanning.catch(() => {});
+    this.active = Promise.race([
+      scanning,
+      new Promise<void>(resolve => { const t = setTimeout(resolve, 45_000); if (typeof t.unref === 'function') t.unref(); }),
+    ]).catch(() => this.report())
       .finally(() => { this.active = undefined; });
     return this.active;
   }

@@ -12,7 +12,7 @@ import { Store } from '../dist/store.js';
 import { createRequire } from 'node:module';
 
 const flags = { dry: process.argv.slice(2).includes('--dry') };
-const DB = `${process.env.HOME}/.config/opencode/opencode-herdr/coordination.sqlite`;
+const DB = `${process.env.HOME}/.config/opencode/supreme-consciousness/coordination.sqlite`;
 const PENDING = new Set(['queued', 'unknown', 'submitted', 'accepted']);
 
 const require_ = createRequire(import.meta.url);

@@ -33,7 +33,7 @@ function flatColours(theme: unknown): ThemeColours {
 function Coordination(props: { api: TuiApi; sessionID: string }) {
   let store: Store;
   try { store = new Store(); }
-  catch { return <text fg={props.api.theme.current.warning}>Coordination store unavailable</text>; }
+  catch (error) { return <text fg={props.api.theme.current.warning}>{`Coordination store unavailable: ${String((error as Error)?.message ?? error).slice(0, 120)}`}</text>; }
   onCleanup(() => store.close());
   return <Mailbox api={props.api} sessionID={props.sessionID} store={{
     list: sessionID => { const local = store.list(sessionID); return { ...local, outbox: [...local.outbox, ...remoteOutbox(store, sessionID)] }; },

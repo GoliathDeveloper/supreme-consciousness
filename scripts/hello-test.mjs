@@ -39,17 +39,29 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 const { stdout } = await run(shim, ['agent', 'list'], { timeout: 15_000, maxBuffer: 8 * 1024 * 1024 });
-const agents = (JSON.parse(stdout)?.result?.agents ?? []).filter(a => !a.conflict || a.conflict <= 1);
+const store = new Store();
+// Observe before enqueueing — the same inventory pass the delivery workers
+// run. This pins every live pane into the store (the shim may report sessions
+// the workers have not observed yet, e.g. right after a /new), so the
+// recipient rows exist when enqueue resolves their agent records.
+const { inventory } = await import('../dist/delivery.js');
+const observed = await inventory(store).catch(() => []);
+const agents = (observed.length ? observed : (JSON.parse(stdout)?.result?.agents ?? []).filter(a => !a.conflict || a.conflict <= 1).map(a => ({
+  id: createHash('sha256').update(`${store.machineId}\0${a.agent_session.value}`).digest('hex'),
+  sessionId: a.agent_session.value,
+  directory: a.cwd, label: a.name, paneId: a.pane_id, terminalId: a.terminal_id,
+  workspaceId: a.workspace_id, state: a.agent_status, lastSeen: Date.now(),
+})));
 const resolve = (needle) => {
   const lower = needle.toLowerCase();
-  const found = agents.find(a => a.agent_session?.value === needle)
-    ?? agents.find(a => (a.name ?? '').toLowerCase().includes(lower) || (a.cwd ?? '').toLowerCase().includes(lower));
-  if (!found) { console.error(`No agent matches "${needle}". Live panes:`); for (const a of agents) console.error(`  ${a.name} (${a.agent_session?.value})`); process.exit(1); }
+  const found = agents.find(a => a.sessionId === needle)
+    ?? agents.find(a => (a.label ?? '').toLowerCase().includes(lower) || (a.directory ?? '').toLowerCase().includes(lower));
+  if (!found) { console.error(`No agent matches "${needle}". Live panes:`); for (const a of agents) console.error(`  ${a.label ?? a.sessionId} (${a.sessionId})`); process.exit(1); }
   return found;
 };
 const origin = resolve(flags.from);
-const others = agents.filter(a => a.agent_session?.value !== origin.agent_session?.value);
-const label = (a) => String(a.name ?? a.cwd ?? a.pane_id).replace(/^OC \| /, '').slice(0, 26);
+const others = agents.filter(a => a.sessionId !== origin.sessionId);
+const label = (a) => String(a.label ?? a.directory ?? a.paneId).replace(/^OC \| /, '').slice(0, 26);
 
 if (!flags.dry && !flags.force) {
   const { createRequire } = await import('node:module');
@@ -82,8 +94,6 @@ if (!flags.dry && !flags.force) {
 
 const stamp = Date.now().toString(36).slice(-6);
 const legKey = (n) => `hello-${stamp}-leg${n}`;
-
-const store = new Store();
 const agentId = (sessionId) => createHash('sha256').update(`${store.machineId}\0${sessionId}`).digest('hex');
 
 if (!flags.flat) {
@@ -109,7 +119,7 @@ if (!flags.flat) {
         ? `Hello relay leg 1/1. Call read_task (requestId/generation/deliveryId above), then hand_back completed with summary 'hello circle closed by ${label(hop)}'.`
         : `Hello relay leg ${n}/${N}: ${from} greeted you — the circle is complete! Call read_task (requestId/generation/deliveryId above), then hand_back completed with summary 'leg ${n}/${N}: ${from} greeted ${label(hop)} back — all ${N} agents said hello'.`;
     } else {
-      brief = `Hello relay leg ${n}/${N}: ${from} greeted you! Please pass the greeting on to ${label(next)}: Call read_task (requestId/generation/deliveryId above), then request_agent identity "${agentId(next.agent_session.value)}" kind task key "${legKey(n + 1)}" with EXACTLY this text: ${JSON.stringify(brief)} then hand_back completed with summary 'leg ${n}/${N}: ${label(hop)} greeted ${label(next)}'.`;
+      brief = `Hello relay leg ${n}/${N}: ${from} greeted you! Please pass the greeting on to ${label(next)}: Call read_task (requestId/generation/deliveryId above), then request_agent identity "${agentId(next.sessionId)}" kind task key "${legKey(n + 1)}" with EXACTLY this text: ${JSON.stringify(brief)} then hand_back completed with summary 'leg ${n}/${N}: ${label(hop)} greeted ${label(next)}'.`;
     }
     briefs.set(n, brief);
   }
@@ -122,9 +132,9 @@ if (!flags.flat) {
 
   try {
     const request = store.enqueue({
-      originSessionId: origin.agent_session.value,
-      originDirectory: origin.cwd,
-      recipientId: agentId(route[0].agent_session.value),
+      originSessionId: origin.sessionId,
+      originDirectory: origin.directory,
+      recipientId: agentId(route[0].sessionId),
       kind: 'task',
       text: briefs.get(1),
       executionPolicy: 'advisory',
@@ -156,9 +166,9 @@ if (flags.dry) {
 }
 try {
   const enqueued = briefs.map(b => store.enqueue({
-    originSessionId: origin.agent_session.value,
-    originDirectory: origin.cwd,
-    recipientId: agentId(b.hop.agent_session.value),
+    originSessionId: origin.sessionId,
+    originDirectory: origin.directory,
+    recipientId: agentId(b.hop.sessionId),
     kind: 'task',
     text: b.text,
     executionPolicy: 'advisory',
