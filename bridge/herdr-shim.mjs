@@ -12,7 +12,7 @@
 // It never changes coordination state; the plugin's Store remains the source of
 // truth and the GUI stays a presentation and interaction layer.
 import { execFile } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -116,6 +116,58 @@ async function opencodeSessions() {
 // Shape the plugin expects: {"result":{"agents":[{pane_id, terminal_id,
 // workspace_id, cwd, agent, agent_status, name, agent_session:{...}}]}}
 
+// Sticky pane→session bindings: the last *authoritative* pairing observed per
+// pane. The server cannot see which session an idle TUI displays, so without
+// this memory every agent-list call re-guesses — and after /new the guess
+// self-sustains (deliveries bump the orphaned session's recency). Bindings are
+// written only on authoritative signals (the TUI's 7501 title, the pane's own
+// running turn, an unambiguous directory); a recency guess is flagged in the
+// inventory and never memorised.
+const BINDINGS_FILE = () => join(homedir(), '.local/state/opencode-herdr/shim-bindings.json');
+
+function loadBindings() {
+  try { return JSON.parse(readFileSync(BINDINGS_FILE(), 'utf8')); } catch { return {}; }
+}
+
+function saveBindings(bindings) {
+  try {
+    mkdirSync(join(BINDINGS_FILE(), '..'), { recursive: true, mode: 0o700 });
+    writeFileSync(BINDINGS_FILE(), JSON.stringify(bindings));
+  } catch {}
+}
+
+const isAgentPane = (term) =>
+  term.detail?.foreground?.name === 'opencode' || term.detail?.status?.app === 'opencode';
+
+// Resolve which session a pane's TUI is displaying. Precedence: the TUI's
+// transient 7501 title (authoritative while a turn runs) > the pane's own
+// running turn (binds even untitled sessions) > the sticky binding >
+// an unambiguous single candidate > a flagged recency guess.
+function resolvePaneSession(term, candidates, active, bindings) {
+  const title = term.detail?.status?.title;
+  const working = term.detail?.status?.state === 'working';
+  const running = candidates.filter(s => active[s.id]?.type === 'running');
+  const sticky = candidates.find(s => s.id === bindings[term.paneId]);
+  let picked, ambiguous;
+  if (title) {
+    picked = candidates.find(s => (s.title ?? '') === title);
+    if (!picked) return { picked: undefined };
+  } else if (working && running.length === 1) {
+    picked = running[0];
+  } else if (sticky) {
+    picked = sticky;
+  } else if (candidates.length === 1) {
+    picked = candidates[0];
+  } else {
+    picked = running[0] ?? [...candidates].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    // Actionable ambiguity counts only recently-active sessions: a directory
+    // with ten day-old test sessions is history, not a live guess.
+    const horizon = Date.now() - 6 * 3600_000;
+    ambiguous = candidates.filter(s => (s.updatedAt ?? 0) > horizon).length;
+  }
+  return { picked, ambiguous };
+}
+
 async function agentList() {
   const [terms, { sessions, active }] = await Promise.all([terminals(), opencodeSessions()]);
   const byDirectory = new Map();
@@ -128,54 +180,30 @@ async function agentList() {
   // Only terminals actually running OpenCode are agents. A plain shell in the
   // same directory (e.g. where the test scripts run) must never be attributed
   // a session: the TUI reports itself via foreground process + OSC 7501 status.
-  const isAgentPane = (term) =>
-    term.detail?.foreground?.name === 'opencode' || term.detail?.status?.app === 'opencode';
+  const agents_ = terms.filter(isAgentPane);
+  const bindings = loadBindings();
+  let dirty = false;
+  const resolve = (term) => {
+    const candidates = term.directory ? (byDirectory.get(term.directory) ?? []) : [];
+    if (!candidates.length) return {};
+    const { picked, ambiguous } = resolvePaneSession(term, candidates, active, bindings);
+    if (picked && !(ambiguous > 1) && bindings[term.paneId] !== picked.id) {
+      bindings[term.paneId] = picked.id;
+      dirty = true;
+    }
+    return { picked, ambiguous };
+  };
   // Same conversation attached in more than one pane: the store refuses to
   // serve a session from two panes, so surface the conflict to the human.
   const sessionPanes = new Map();
-  for (const term of terms.filter(isAgentPane)) {
-    const candidates = term.directory ? (byDirectory.get(term.directory) ?? []) : [];
-    if (!candidates.length) continue;
-    const title = term.detail?.status?.title;
-    let picked;
-    if (title) {
-      picked = candidates.find(s => (s.title ?? '') === title);
-      if (!picked) continue;
-    } else if (candidates.length === 1) {
-      picked = candidates[0];
-    } else {
-      const running = candidates.filter(s => active[s.id]?.type === 'running');
-      picked = running[0] ?? [...candidates].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-    }
+  for (const term of agents_) {
+    const { picked } = resolve(term);
     if (picked) sessionPanes.set(picked.id, (sessionPanes.get(picked.id) ?? 0) + 1);
   }
   const agents = [];
-  for (const term of terms.filter(isAgentPane)) {
-    const candidates = term.directory ? (byDirectory.get(term.directory) ?? []) : [];
-    if (!candidates.length) continue;
-    // Binding precedence: the TUI's transient 7501 title is authoritative
-    // while a turn runs (it names the displayed session). Outside activity,
-    // a single-session directory binds unambiguously; multiple candidates
-    // are a guess — flagged so the mod can warn instead of guessing silently.
-    // After /new the orphaned old session wins recency on its own (deliveries
-    // bump it), so a flagged pane needs a first message (or orphan removal)
-    // before deliveries make sense again.
-    const title = term.detail?.status?.title;
-    const running = candidates.filter(s => active[s.id]?.type === 'running');
-    let picked, ambiguous;
-    if (title) {
-      const byTitle = candidates.filter(s => (s.title ?? '') === title);
-      if (!byTitle.length) continue;
-      picked = byTitle[0];
-    } else if (candidates.length === 1) {
-      picked = candidates[0];
-    } else {
-      picked = running[0] ?? [...candidates].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-      // Actionable ambiguity counts only recently-active sessions: a directory
-      // with ten day-old test sessions is history, not a live guess.
-      const horizon = Date.now() - 6 * 3600_000;
-      ambiguous = candidates.filter(s => (s.updatedAt ?? 0) > horizon).length;
-    }
+  for (const term of agents_) {
+    const { picked, ambiguous } = resolve(term);
+    if (!picked) continue;
     const panes = sessionPanes.get(picked.id) ?? 1;
     // Prefer the TUI's own OSC 7501 state; the server-side execution map
     // catches turns the TUI has not rendered yet (delivery-worker prompts).
@@ -196,6 +224,11 @@ async function agentList() {
       agent_session: { agent: 'opencode', kind: 'id', value: picked.id },
     });
   }
+  // Prune bindings for panes that no longer exist, persist only on change.
+  for (const paneId of Object.keys(bindings)) {
+    if (!agents_.some(term => term.paneId === paneId)) { delete bindings[paneId]; dirty = true; }
+  }
+  if (dirty) saveBindings(bindings);
   return { result: { agents } };
 }
 
@@ -298,6 +331,33 @@ async function paneOfTerminal(terminalId) {
   return { result: { pane: term.paneId } };
 }
 
+// Session hygiene: server-side sessions that no pane is bound to. A /new
+// orphans the previous session; the server keeps it forever, and before
+// sticky bindings deliveries could drift into it. Read-only listing —
+// deletion stays the human's call via DELETE /api/session/{id}.
+async function sessionOrphans() {
+  const [terms, { sessions, active }] = await Promise.all([terminals(), opencodeSessions()]);
+  const bindings = loadBindings();
+  const bound = new Set(Object.values(bindings));
+  for (const term of terms.filter(isAgentPane)) {
+    const candidates = term.directory ? sessions.filter(s => s.directory === term.directory) : [];
+    if (!candidates.length) continue;
+    const { picked } = resolvePaneSession(term, candidates, active, bindings);
+    if (picked) bound.add(picked.id);
+  }
+  const orphans = sessions
+    .filter(s => !bound.has(s.id))
+    .map(s => ({
+      id: s.id,
+      title: s.title ?? null,
+      directory: s.directory ?? null,
+      updatedAt: s.updatedAt ?? null,
+      running: active[s.id]?.type === 'running' ?? false,
+    }))
+    .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  return { result: { orphans, count: orphans.length } };
+}
+
 // ——— herdr review ———————————————————————————————————————————————————————————
 // Human-review view over the coordination store (read-only): what each agent
 // asked the other to do, the outcome, and the lifecycle transitions. The store
@@ -393,6 +453,10 @@ try {
         break;
       case 'review':
         return out(await review(Number(positional[0]) || Number(flags.limit) || 20));
+      case 'session':
+        if (positional[0] === 'orphans') return out(await sessionOrphans());
+        fail('usage: herdr session orphans');
+        return;
       case 'pane': {
         const target = positional[0];
         if (target === 'split') return out(await paneSplit(positional[1], flags.direction ?? 'right', flags.cwd));
