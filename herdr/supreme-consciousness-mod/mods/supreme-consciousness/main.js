@@ -315,7 +315,7 @@ export default class CoordinationPanel extends View {
       .child(div().text_color(t.dim).child(`${target.box} · ${items.length} item${items.length === 1 ? "" : "s"} — click one for details`))
       .when(items.length === 0, (el) => el.child(div().text_color(t.dim).child("empty")))
       .when(items.length > 0, (el) => el.children(shown.map((item, index) => this.safe(`mail ${item.id?.slice(0, 8)}`, () => this.mailboxItemRow(item, index)))))
-      .when(items.length > shown.length, (el) => el.child(div().id("mail-more").text_color(t.primary)
+      .when(items.length > shown.length, (el) => el.child(div().id("mail-more").text_color(t.accent)
         .on_click((_e, cx) => { this.mailboxShowAll = true; cx?.notify(); })
         .child(`show all ${items.length}`)));
   }
