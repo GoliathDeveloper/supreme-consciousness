@@ -58,7 +58,9 @@ through OpenCode; the mesh spans machines via the plugin's SSH transport
    (`~/.config/herdr-app/mods/`). If it already holds this panel, update that
    installation instead of installing a duplicate.
 3. Add this block to the layout where the panel should live (a sidebar column
-   is typical; `weight`/`min` are yours to tune):
+   is typical; `weight`/`min` are yours to tune). **The shipped `main` layout
+   is read-only** — clone it first (`herdr-app do layout.clone
+   '{"name":"main","as":"main-coordination"}'`) and edit the clone:
 
    ```json
    { "id": "coordination", "type": "block", "size": { "weight": 1.4 },
@@ -75,12 +77,21 @@ through OpenCode; the mesh spans machines via the plugin's SSH transport
 On the machine whose agents should join the mesh:
 
 1. `git clone https://github.com/GoliathDeveloper/supreme-consciousness "$HOME/.local/share/supreme-consciousness"`
-   then `cd "$HOME/.local/share/supreme-consciousness" && npm install --omit=dev && npm run build`
+   then `cd "$HOME/.local/share/supreme-consciousness" && npm install && npm run build`
+   (a full `npm install` — the build needs `typescript`, a devDependency; `--omit=dev` breaks it. `dist/` is shipped, so the build is optional if you don't need source fixes.)
 2. Register the plugin in `~/.config/opencode/opencode.jsonc`:
    `"plugins": [ { "package": "<the absolute path above>" } ]`
+   The plugin hot-loads — restart the OpenCode service only if the tools do not appear.
 3. Install the inventory shim:
    `cp bridge/herdr-shim.mjs "$HOME/.local/bin/herdr" && chmod +x "$HOME/.local/bin/herdr"`
-4. Restart the OpenCode service once: `opencode service restart`
+4. Verify (each should pass):
+   ```sh
+   herdr agent list | python3 -c "import json,sys; print('agents:', len(json.load(sys.stdin)['result']['agents']))"
+   herdr review 1
+   ls ~/.local/state/supreme-consciousness/metadata   # files appear within ~2s per agent
+   ```
+   `open_agent` provisioning additionally wants `HERDR_ENV=1` and `HERDR_PANE_ID` exported
+   in the shell profile (see the plugin README); basic coordination works without them.
 
 The plugin's own README covers agent-to-agent requests, the integrity guard,
 cross-machine peers (SSH + token pairing) and the request lifecycle.

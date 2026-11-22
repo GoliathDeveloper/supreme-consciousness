@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { PluginInput } from '@opencode-ai/plugin'
-import { DeliveryWorker, inventory, requestPrompt } from '../src/delivery.js'
+import { DeliveryWorker, inventory, requestPrompt, shimPath } from '../src/delivery.js'
 import { Store } from '../src/store.js'
 import type { Agent } from '../src/model.js'
 
@@ -97,7 +97,7 @@ test('inventory preserves two unaffected agents around a changed stored binding'
   expect(f.store.agent(first.id).state).toBe('working')
   expect(f.store.agent(last.id).state).toBe('done')
   expect(runner).toHaveBeenCalledTimes(1)
-  expect(runner).toHaveBeenCalledWith('herdr', ['agent', 'list'], { timeout: 5000, maxBuffer: 4 * 1024 * 1024, env })
+  expect(runner).toHaveBeenCalledWith(shimPath(), ['agent', 'list'], { timeout: 5000, maxBuffer: 4 * 1024 * 1024, env })
 })
 
 test.each([false, true])('inventory excludes both conflicting same-session candidates, changed first: %j', async changedFirst => {

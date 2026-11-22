@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { shimPath } from "./delivery.js";
 
 // Flat palette the TUI projections speak. The V2 TUI theme resolves nested
 // semantic tokens whose paths vary across releases, so the TUI entry maps
@@ -84,7 +85,7 @@ type Runner = (file: string, args: string[], options: { timeout: number }) => Pr
 /** The plugin root, published with every metadata write so the Coordination
  *  panel's actions (hello test, cancel) can locate the scripts that ship with
  *  this plugin — any install path, any machine, any process environment. */
-export const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
+export const pluginRoot = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 
 /** Call from the host's poll loop. Unchanged tokens refresh after 10 seconds. */
 export function createSidebarPublisher(run: Runner = promisify(execFile)) {
@@ -98,7 +99,7 @@ export function createSidebarPublisher(run: Runner = promisify(execFile)) {
     if (previous?.sessionId === sessionId && previous.tokens === serialised && Date.now() - previous.at < 10_000) return true;
     inFlight.add(paneId);
     try {
-      await run("herdr", [
+      await run(shimPath(), [
         "pane", "report-metadata", paneId,
         "--source", "supreme-consciousness", "--agent", "opencode",
         "--applies-to-source", "herdr:opencode", "--ttl-ms", "30000",

@@ -1,9 +1,16 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomBytes } from "node:crypto";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { PluginInput } from "@opencode-ai/plugin";
 import type { Store } from "./store.js";
 import type { Agent, Request } from "./model.js";
+
+// The desktop generation's plugin host does not inherit the login-shell PATH
+// (no ~/.local/bin), so a bare execFile("herdr") fails with ENOENT even when
+// the shim is installed. Resolve it absolutely; HERDR_SHIM overrides.
+export const shimPath = () => process.env.HERDR_SHIM ?? join(homedir(), ".local", "bin", "herdr");
 import { createSidebarPublisher } from "./sidebar.js";
 import { remoteOutbox } from "./remote.js";
 
@@ -29,7 +36,7 @@ export async function inventory(store: Store, env: NodeJS.ProcessEnv = process.e
   // stable symbolic value for every process in this generation.
   if (env.HERDR_ENV !== undefined && env.HERDR_ENV !== "1") return [];
   const socket = "herdr-core:local";
-  const response = await runner("herdr", ["agent", "list"], { timeout: 5000, maxBuffer: 4 * 1024 * 1024, env }).catch(() => null);
+  const response = await runner(shimPath(), ["agent", "list"], { timeout: 5000, maxBuffer: 4 * 1024 * 1024, env }).catch(() => null);
   if (!response) return [];
   const panes = JSON.parse(response.stdout).result?.agents;
   if (!Array.isArray(panes)) throw new Error("Invalid Herdr inventory");
