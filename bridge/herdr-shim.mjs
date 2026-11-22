@@ -102,6 +102,10 @@ async function opencodeSessions() {
       id: s.id,
       directory: s.location?.directory ?? s.directory ?? null,
       updatedAt: s.time?.updated ?? s.updatedAt ?? 0,
+      // The TUI touches `viewed` for the session it is displaying — and worker
+      // submissions never do, so this is the display signal that survives
+      // delivery poisoning (updatedAt cannot be trusted for binding).
+      viewed: s.time?.viewed ?? 0,
       title: s.title ?? null,
     }));
   } catch { /* OpenCode API unavailable: inventory reports terminals only */ }
@@ -154,16 +158,23 @@ function resolvePaneSession(term, candidates, active, bindings) {
     if (!picked) return { picked: undefined };
   } else if (working && running.length === 1) {
     picked = running[0];
-  } else if (sticky) {
-    picked = sticky;
-  } else if (candidates.length === 1) {
-    picked = candidates[0];
   } else {
-    picked = running[0] ?? [...candidates].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-    // Actionable ambiguity counts only recently-active sessions: a directory
-    // with ten day-old test sessions is history, not a live guess.
-    const horizon = Date.now() - 6 * 3600_000;
-    ambiguous = candidates.filter(s => (s.updatedAt ?? 0) > horizon).length;
+    // The TUI touches `viewed` for the session it displays, and nothing else
+    // does — so the most-recently-viewed candidate IS what the pane shows,
+    // even when sticky bindings and updatedAt point somewhere else (a /new
+    // orphans the old session; worker submissions never touch viewed).
+    const viewed = [...candidates].sort((a, b) => (b.viewed ?? 0) - (a.viewed ?? 0));
+    if (viewed.length && (viewed[0].viewed ?? 0) > 0) {
+      picked = viewed[0];
+    } else if (sticky) {
+      picked = sticky;
+    } else if (candidates.length === 1) {
+      picked = candidates[0];
+    } else {
+      picked = running[0] ?? [...candidates].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      const horizon = Date.now() - 6 * 3600_000;
+      ambiguous = candidates.filter(s => (s.updatedAt ?? 0) > horizon).length;
+    }
   }
   return { picked, ambiguous };
 }
