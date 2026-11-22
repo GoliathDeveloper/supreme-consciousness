@@ -169,6 +169,25 @@ them to the full id for you.
 **Free OpenRouter models 429.** Daily free-tier limit — use local models
 (`llama-local/lfm3-opencode`) or a paid model for the test window.
 
+**Local model says "Context size has been exceeded".** OpenCode's system prompt
+plus the coordination plugins' tool schemas is ~8k tokens **before any
+conversation**, so an 8192-token context window can never fit — not even a
+fresh session. Two knobs must agree:
+
+```sh
+# server side — Llama.app's user override file takes over from its ctx picker
+# (~/.config/llama/models.user.ini, [LiquidAI/LFM3-1.7B-GGUF:Q8_0] section):
+#   ctx-size = 32768        # model is trained for 262k; extra window is cheap
+# then restart the Llama app (not opencode) and verify:
+curl -s http://127.0.0.1:9931/v1/models | python3 -c \
+  "import json,sys; print(json.load(sys.stdin)['data'][0]['meta']['n_ctx'])"
+
+# opencode side — ~/.config/opencode/opencode.jsonc must declare the same
+# window ("limit": { "context": 32768, ... } on the lfm3-opencode-8k entry);
+# the running service hot-reloads this — verify with `opencode api get /api/model`
+```
+
+
 **Nothing is delivered.** Check `herdr agent list` shows the target pane with
 a session id, and that the recipient is not already mid-turn. After any
 `~/.zshrc` environment change, `opencode service restart` once.
