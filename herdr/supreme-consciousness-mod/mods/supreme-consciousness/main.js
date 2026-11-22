@@ -2,11 +2,12 @@
 //
 // Presentation and interaction layer only: it renders the inbox/outbox/wait
 // tokens published by the supreme-consciousness plugin (via the `herdr` shim's
-// metadata files), the plugin's agent inventory, live coordination activity
-// (pending work and the transition feed), and a human-review history of what
-// each agent asked another to do (read-only projection of the coordination
-// store). Clicks only focus panes. It never changes coordination state — the
-// plugin's SQLite store stays the source of truth.
+// metadata files), the plugin's agent inventory, and live coordination activity
+// (pending work and the transition feed). The in/out chips are the mailbox
+// interface: clicking one opens that agent's mailbox (read-only shim
+// projection), and clicking an item opens its detail. Clicks otherwise only
+// focus panes. It never changes coordination state — the plugin's SQLite store
+// stays the source of truth.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
@@ -61,6 +62,10 @@ export default class CoordinationPanel extends View {
     this.pluginRoot = null;
     this.rename = null; // { sessionId, state, message } — one agent at a time
     this.renameInput = null;
+    this.mailbox = null; // { sessionId, box: "inbox"|"outbox" } — one open mailbox
+    this.mailboxData = null; // the shim's mailbox projection for the open mailbox
+    this.mailboxShowAll = false; // mailbox lists start at the newest few
+    this.detail = null; // { id, loading, data, error } — one open request detail
     cx.spawn(async (cx) => {
       while (true) {
         await this.refresh();
@@ -135,6 +140,8 @@ export default class CoordinationPanel extends View {
       this.processed = 0;
       this.counts = {};
     }
+    // An open mailbox reloads with every refresh tick so its items stay live.
+    if (this.mailbox) await this.loadMailbox();
     // Window badge: pending coordination work is visible even when this panel
     // is not on screen. Clear when nothing is owed.
     if (!checking()) {
@@ -173,6 +180,139 @@ export default class CoordinationPanel extends View {
 
   tokenRow(label, value) {
     return this.chip(label, value);
+  }
+
+  // ——— Mailbox: the chips are the interface ———
+  //
+  // Clicking an agent's in/out chip opens that mailbox inline: the same items
+  // the chip counts (the shim's read-only `herdr mailbox` projection — work
+  // orders, receipts, handbacks, remote placeholders). Clicking an item opens
+  // its detail (`herdr request`): the local store history, or a remote
+  // request's cached SSH receipt. The mod never touches the store itself.
+
+  openMailbox(agent, box, cx) {
+    const sessionId = agent.sessionId ?? agent.agent_session?.value;
+    if (!sessionId) return;
+    if (this.mailbox && this.mailbox.sessionId === sessionId && this.mailbox.box === box) {
+      this.mailbox = null;
+      this.mailboxData = null;
+      this.detail = null;
+      cx?.notify();
+      return;
+    }
+    this.mailbox = { sessionId, box };
+    this.mailboxData = null;
+    this.mailboxShowAll = false;
+    this.detail = null;
+    this.loadMailbox(cx);
+  }
+
+  async loadMailbox(cx) {
+    const target = this.mailbox;
+    if (!target) return;
+    try {
+      const res = await exec("herdr", ["mailbox", target.sessionId]);
+      if (this.mailbox !== target) return;
+      const parsed = JSON.parse(res.stdout || "{}")?.result;
+      this.mailboxData = res.code === 0 && parsed ? parsed : { error: clip((res.stderr || `exit ${res.code}`), 140) };
+    } catch (error) {
+      if (this.mailbox === target) this.mailboxData = { error: clip(String(error), 140) };
+    }
+    cx?.notify();
+  }
+
+  openDetail(id, cx) {
+    if (this.detail?.id === id) {
+      this.detail = null;
+      cx?.notify();
+      return;
+    }
+    this.detail = { id, loading: true, data: null, error: null };
+    cx?.notify();
+    exec("herdr", ["request", id]).then((res) => {
+      if (this.detail?.id !== id) return;
+      let parsed = null;
+      try { parsed = JSON.parse(res.stdout || "{}")?.result; } catch {}
+      if (res.code === 0 && parsed && !parsed.error) this.detail = { id, loading: false, data: parsed, error: null };
+      else this.detail = { id, loading: false, data: null, error: clip(parsed?.error || (res.stderr || `exit ${res.code}`), 140) };
+      cx.notify();
+    }).catch((error) => {
+      if (this.detail?.id !== id) return;
+      this.detail = { id, loading: false, data: null, error: clip(String(error), 140) };
+      cx.notify();
+    });
+  }
+
+  mailboxItems() {
+    const box = this.mailbox?.box;
+    const data = this.mailboxData;
+    if (!box || !data || data.error) return [];
+    const items = box === "inbox" ? (data.inbox ?? []) : [...(data.outbox ?? []), ...(data.remote ?? [])];
+    return [...items].sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
+  }
+
+  mailboxItemRow(item) {
+    const t = theme();
+    const color = t[STATE_COLOR[item.state] ?? "idle"] ?? t.idle;
+    const open = this.detail?.id === item.id;
+    const remote = item.kind === "remote";
+    const row = h_flex().gap(5).items_center().p(5).rounded(5).bg(t.canvas)
+      .id(`mail-${item.id?.slice(0, 8)}`)
+      .on_click((_e, cx) => this.openDetail(remote && item.remoteRequest ? item.remoteRequest : item.id, cx))
+      .child(div().size(6).rounded(3).flex_none().bg(color))
+      .child(div().text_color(t.dim).flex_none().child(clock(item.updatedAt, true)))
+      .child(div().text_color(t.foreground).flex_1().child(clip(item.brief ?? `${remote ? "remote" : item.kind} ${item.id?.slice(0, 8)}`, 88)))
+      .when(remote, (el) => el.child(div().text_color(t.dim).flex_none().child(`⇄ ${clip(item.recipient, 14)}`)))
+      .child(div().text_color(color).flex_none().child(item.state));
+    const card = open ? this.detailCard() : null;
+    return v_flex().gap(2).child(row).when(Boolean(card), (el) => el.child(card));
+  }
+
+  detailCard() {
+    const t = theme();
+    const detail = this.detail;
+    if (!detail) return null;
+    if (detail.loading) return div().text_color(t.dim).child("loading details…");
+    if (detail.error) return div().text_color(t.blocked).child(clip(`details unavailable: ${detail.error}`, 150));
+    const data = detail.data ?? {};
+    if (data.remote) {
+      const history = data.history ?? {};
+      const request = history.request ?? {};
+      const result = (history.results ?? [])[0] ?? {};
+      return v_flex().gap(2).p(6).rounded(5).bg(t.canvas)
+        .child(div().text_color(t.foreground).child(clip(request.text ?? data.remote.operationId, 220)))
+        .child(h_flex().gap(6).items_center()
+          .child(div().text_color(t.dim).child(`⇄ ${data.remote.peerId}`))
+          .child(div().text_color(t[STATE_COLOR[request.state] ?? "idle"] ?? t.idle).child(request.state ?? data.remote.operationState)))
+        .when(Boolean(result.summary), (el) => el.child(div().text_color(t.done).child(clip(`→ ${result.summary}`, 200))));
+    }
+    const request = data.request ?? {};
+    const color = t[STATE_COLOR[request.state] ?? "idle"] ?? t.idle;
+    const transitions = (data.audit ?? []).map((step) => `${step.actor}:${step.transition}`);
+    return v_flex().gap(2).p(6).rounded(5).bg(t.canvas)
+      .child(div().text_color(t.foreground).child(clip(request.brief ?? request.id, 220)))
+      .child(h_flex().gap(6).items_center()
+        .child(div().text_color(t.dim).child(`${clip(request.origin, 18)} → ${clip(request.recipient, 18)}`))
+        .child(div().text_color(color).child(request.state)))
+      .when(Boolean(request.summary), (el) => el.child(div().text_color(color).child(clip(`→ ${request.summary}`, 200))))
+      .when(transitions.length > 0, (el) => el.child(div().text_color(t.dim).text_size(10.5).child(transitions.join(" → "))));
+  }
+
+  mailboxSection() {
+    const t = theme();
+    const target = this.mailbox;
+    if (!target) return null;
+    if (!this.mailboxData) return div().text_color(t.dim).child("opening mailbox…");
+    if (this.mailboxData.error) return div().text_color(t.blocked).child(clip(`mailbox unavailable: ${this.mailboxData.error}`, 150));
+    const items = this.mailboxItems();
+    const shown = this.mailboxShowAll ? items : items.slice(0, 10);
+    return v_flex().gap(2).pt(1)
+      .child(div().text_color(t.dim).child(`${target.box} · ${items.length} item${items.length === 1 ? "" : "s"} — click one for details`))
+      .when(items.length === 0, (el) => el.child(div().text_color(t.dim).child("empty")))
+      .when(items.length > 0, (el) => el.children(shown.map((item) => this.safe(`mail ${item.id?.slice(0, 8)}`, () => this.mailboxItemRow(item)))))
+      .when(items.length > shown.length, (el) => el.child(div().id("mail-more").text_color(t.primary)
+        .on_click((_e, cx) => { this.mailboxShowAll = true; cx?.notify(); })
+        .child(`show all ${items.length}`)));
   }
 
   // ——— Rename: the human names their agents ———
@@ -257,8 +397,9 @@ export default class CoordinationPanel extends View {
   agentRow(agent, pending) {
     const t = theme();
     const pane = agent.pane_id;
+    const sessionId = agent.sessionId ?? agent.agent_session?.value;
     const busy = agent.agent_status === "working";
-    const work = pending[agent.sessionId ?? agent.agent_session?.value];
+    const work = pending[sessionId];
     const active = busy || Boolean(work);
     const conflict = Number(agent.conflict ?? 0) > 1;
     const ambiguous = Number(agent.ambiguous ?? 0) > 1;
@@ -289,11 +430,14 @@ export default class CoordinationPanel extends View {
       .when(Boolean(conflictLine), el => el.child(conflictLine))
       .when(Boolean(ambiguousLine), el => el.child(ambiguousLine))
       .when(Boolean(workLine), el => el.child(workLine))
-      .when(Boolean(this.rename && this.rename.sessionId === (agent.sessionId ?? agent.agent_session?.value)), (el) => el.child(this.renameEditor(agent)))
+      .when(Boolean(this.rename && this.rename.sessionId === sessionId), (el) => el.child(this.renameEditor(agent)))
       .child(h_flex().gap(12)
-        .child(this.tokenRow("in", this.token(pane, "herdr_inbox")))
-        .child(this.tokenRow("out", this.token(pane, "herdr_outbox")))
-        .child(this.tokenRow("wait", this.token(pane, "herdr_wait"))));
+        .child(div().id(`chip-in-${pane?.slice(0, 8)}`).child(this.tokenRow("in", this.token(pane, "herdr_inbox")))
+          .when(Boolean(sessionId), (el) => el.on_click((_e, cx) => { cx.stop_propagation(); this.openMailbox(agent, "inbox", cx); })))
+        .child(div().id(`chip-out-${pane?.slice(0, 8)}`).child(this.tokenRow("out", this.token(pane, "herdr_outbox")))
+          .when(Boolean(sessionId), (el) => el.on_click((_e, cx) => { cx.stop_propagation(); this.openMailbox(agent, "outbox", cx); })))
+        .child(this.tokenRow("wait", this.token(pane, "herdr_wait"))))
+      .when(Boolean(this.mailbox && this.mailbox.sessionId === sessionId), (el) => el.child(this.mailboxSection()));
   }
 
   peerRow(p) {
@@ -313,26 +457,6 @@ export default class CoordinationPanel extends View {
         .child(div().flex_1().text_color(t.foreground).child(p.id))
         .child(div().text_color(p.error ? t.blocked : online ? t.done : t.dim).child(status)))
       .child(div().text_color(t.dim).text_size(10.5).child(clip(p.sshTarget, 70)));
-  }
-
-  historyRow(entry, liveBySession) {
-    const t = theme();
-    const color = t[STATE_COLOR[entry.state] ?? "idle"] ?? t.idle;
-    const originAgent = liveBySession.get(entry.originSession);
-    return v_flex().id(`hist-${entry.id?.slice(0, 8)}`).gap(3).p(8).rounded(6).bg(t.canvas)
-      .on_click(() => { if (originAgent) run("agent.focus", { terminal: originAgent.terminal_id }); })
-      .child(h_flex().gap(5).items_center()
-        .child(div().size(6).rounded(3).flex_none().bg(color))
-        .child(div().text_color(t.dim).flex_none().child(clock(entry.updatedAt)))
-        .child(h_flex().gap(3).items_center().flex_1()
-          .child(div().text_color(t.foreground).child(clip(short(entry.origin), 20)))
-          .child(div().text_color(t.dim).child("→"))
-          .child(div().text_color(t.foreground).child(clip(short(entry.recipient), 20))))
-        .child(div().text_color(color).flex_none().child(entry.state)))
-      .child(div().text_color(t.muted).child(clip(entry.brief, 170)))
-      .when(Boolean(entry.summary), el => el.child(div().text_color(color).child(clip(`→ ${entry.summary}`, 170))))
-      .child(div().text_color(t.dim).text_size(10.5).child((entry.transitions ?? []).join(" → ")));
-    return row;
   }
 
   // ——— Hello test: round-robin greeting across all live agents ———
@@ -456,11 +580,8 @@ export default class CoordinationPanel extends View {
     const t = theme();
     const list = this.agents ?? [];
     const peers = this.peers ?? [];
-    const history = this.history ?? [];
     const feed = this.feed ?? [];
     const pending = this.pendingWork();
-    const liveBySession = new Map(list.map(a => [a.agent_session?.value, a]).filter(([session]) => Boolean(session)));
-    const countText = Object.entries(this.counts ?? {}).map(([k, v]) => `${k} ${v}`).join(" · ") || "nothing yet";
     const header = h_flex().gap(6).items_center()
       .child(div().font_weight(600).text_color(t.foreground).child("Coordination"))
       .child(div().flex_1())
@@ -488,12 +609,6 @@ export default class CoordinationPanel extends View {
         .child(div().text_color(t.foreground).child(step.transition))
         .child(div().text_color(t.dim).flex_none().child(step.request?.slice(0, 8) ?? ""))))))
       .child(this.safe("hello", () => this.helloSection()))
-      .child(h_flex().gap(6).items_center().pt(4)
-        .child(div().font_weight(600).text_color(t.foreground).child("History"))
-        .child(div().flex_1())
-        .child(div().text_color(t.dim).child(`${countText} · ${history.length} shown`)))
-      .when(history.length === 0, (el) => el.child(div().text_color(t.dim).child("No requests recorded yet")))
-      .when(history.length > 0, (el) => el.children(history.map(e => this.safe(`history ${e.id?.slice(0, 8)}`, () => this.historyRow(e, liveBySession)))))
-      .child(h_flex().gap(4).items_center().child(div().text_color(t.dim).child("Click an agent, a transition or a history entry to focus its pane")));
+      .child(h_flex().gap(4).items_center().child(div().text_color(t.dim).child("Click an agent to focus it, an in/out chip to open its mailbox, an item for details")));
   }
 }

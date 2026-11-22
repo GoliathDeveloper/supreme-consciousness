@@ -39,10 +39,29 @@ function Coordination(props) {
     }
     onCleanup(() => store.close());
     return <Mailbox api={props.api} sessionID={props.sessionID} store={{
-            list: sessionID => { const local = store.list(sessionID); return { ...local, outbox: [...local.outbox, ...remoteOutbox(store, sessionID)] }; },
+            // The mailbox view, not list(): the chips count the correspondence too
+            // (handbacks as sent mail, delivered notices as received mail), and the
+            // expanded Coordination section must show the same mail the chips count.
+            list: sessionID => { const local = store.mailbox(sessionID); return { ...local, outbox: [...local.outbox, ...remoteOutbox(store, sessionID)] }; },
             history: (id, sessionID) => {
-                const op = store.operations(sessionID).find(op => op.kind === "remote.request" && op.result?.request?.id === id);
-                return op ? { peerId: op.payload.peerId, state: op.state, request: op.result?.request, note: "Remote receipt. Use inspect_request with peerId for full live history." } : store.history(id, sessionID);
+                // A remote operation is identified either by its embedded remote request
+                // id (once a receipt is cached) or by its own operation id (placeholders
+                // have no request row yet) — clicking either must open, never fall
+                // through to the local store, where the request does not exist.
+                const op = store.operations(sessionID).find(op => op.kind === "remote.request"
+                    && (op.id === id || op.result?.request?.id === id));
+                if (!op)
+                    return store.history(id, sessionID);
+                const receipt = op.result?.history;
+                return {
+                    peerId: op.payload.peerId,
+                    state: op.state,
+                    request: op.result?.request,
+                    ...(receipt ? { history: receipt } : {}),
+                    note: receipt
+                        ? "Remote receipt (cached). Use inspect_request with peerId for full live history."
+                        : "Remote request pending — no receipt yet. Use inspect_request with peerId for live state.",
+                };
             },
         }}/>;
 }

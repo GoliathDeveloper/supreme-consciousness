@@ -464,6 +464,110 @@ async function review(limit = 20) {
   } };
 }
 
+// ——— herdr mailbox <sessionId> ——————————————————————————————————————————————
+// The per-agent mailbox the sidebar chips summarize: formal work orders both
+// ways, plus the correspondence — delivered notices (receipts, results) as the
+// origin session's inbound mail, handbacks (results written by the session) as
+// its outbound mail — and remote operations as outbound placeholders. Read-only,
+// same authority as `review`: the human inspecting their own store.
+
+const mailboxProjection = `SELECT r.id, r.kind, r.originSessionId AS origin, r.recipientId AS recipient,
+    r.generation, r.createdAt, r.updatedAt, g.text AS brief,
+    CASE WHEN r.cancelledAt IS NOT NULL THEN 'cancelled'
+         WHEN t.outcome IS NOT NULL THEN t.outcome ELSE d.state END AS state,
+    t.summary, t.validation
+  FROM requests r
+  JOIN generations g ON g.requestId = r.id AND g.generation = r.generation
+  JOIN deliveries d ON d.requestId = r.id AND d.generation = r.generation
+  LEFT JOIN results t ON t.requestId = r.id AND t.generation = r.generation`;
+
+async function mailboxLabels() {
+  try { return await sqliteJson('SELECT id, label, nickname, sessionId FROM agents'); } catch { return []; }
+}
+
+// Same convention as review(): origin/recipient are display labels (nickname
+// or label, falling back to an id prefix), originSession/recipientSession keep
+// the raw store identities so callers can still join on them.
+function mailboxLabelOf(agents, agentId) {
+  if (String(agentId).startsWith('remote:')) return 'remote peer';
+  const agent = agents.find(a => a.id === agentId || a.sessionId === agentId);
+  return agent?.nickname || agent?.label || String(agentId).slice(0, 12);
+}
+
+function mailboxEntry(agents, row) {
+  return { ...row, originSession: row.origin, recipientSession: row.recipient,
+    origin: mailboxLabelOf(agents, row.origin), recipient: mailboxLabelOf(agents, row.recipient) };
+}
+
+async function mailboxListing(sessionId) {
+  if (!/^[A-Za-z0-9_-]{6,80}$/.test(sessionId ?? '')) fail('herdr shim: mailbox <sessionId>');
+  try {
+    // Same composition as the store's mailbox(): the groups concatenate rather
+    // than merge — a request delivered to the session AND announced back to it
+    // is two pieces of mail, exactly what the chips count.
+    const [inboxOrders, receipts] = await Promise.all([
+      sqliteJson(`${mailboxProjection} WHERE r.recipientId IN (SELECT id FROM agents WHERE sessionId='${sessionId}') ORDER BY d.sequence`),
+      sqliteJson(`${mailboxProjection} WHERE r.id IN (SELECT entityId FROM notifications WHERE sessionId='${sessionId}' AND state='delivered') ORDER BY d.sequence`),
+    ]);
+    const [outboxOrders, handbacks] = await Promise.all([
+      sqliteJson(`${mailboxProjection} WHERE r.originSessionId='${sessionId}' ORDER BY d.sequence`),
+      sqliteJson(`${mailboxProjection} WHERE EXISTS (SELECT 1 FROM results t2 WHERE t2.requestId=r.id AND t2.generation=r.generation AND t2.sessionId='${sessionId}') ORDER BY d.sequence`),
+    ]);
+    const remote = await sqliteJson(`SELECT id, state, createdAt, updatedAt,
+        json_extract(payload,'$.peerId') AS peerId,
+        json_extract(result,'$.history.request.id') AS remoteId,
+        json_extract(payload,'$.args.text') AS brief,
+        json_extract(result,'$.history.request.state') AS remoteState,
+        json_extract(result,'$.history.results[0].summary') AS summary
+      FROM operations WHERE kind='remote.request' AND originSessionId='${sessionId}' ORDER BY updatedAt DESC`);
+    const agents = await mailboxLabels();
+    const byNewest = (a, b) => b.updatedAt - a.updatedAt;
+    return { result: {
+      inbox: [...inboxOrders, ...receipts].sort(byNewest).map(row => mailboxEntry(agents, row)),
+      outbox: [...outboxOrders, ...handbacks].sort(byNewest).map(row => mailboxEntry(agents, row)),
+      remote: remote.map(op => ({ id: op.id, kind: 'remote', origin: sessionId, recipient: op.peerId ?? '',
+        originSession: sessionId, recipientSession: '',
+        generation: 0, createdAt: op.createdAt, updatedAt: op.updatedAt, brief: op.brief,
+        state: op.remoteState ?? op.state, summary: op.summary, remoteRequest: op.remoteId ?? null })),
+    } };
+  } catch (error) {
+    return { result: { inbox: [], outbox: [], remote: [], error: `Coordination store unavailable: ${String(error?.message ?? error).slice(0, 120)}` } };
+  }
+}
+
+// ——— herdr request <id> ——————————————————————————————————————————————————————
+// One mailbox item in full. Local requests read their store history; remote
+// requests have no local row, so their latest cached SSH receipt is read from
+// the origin operation instead of failing.
+
+async function requestDetail(id) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id ?? '')) fail('herdr shim: request <uuid>');
+  let request;
+  try { request = (await sqliteJson(`${mailboxProjection} WHERE r.id='${id}'`))[0]; }
+  catch (error) {
+    return { result: { error: `Coordination store unavailable: ${String(error?.message ?? error).slice(0, 120)}` } };
+  }
+  if (request) {
+    const [generations, deliveries, results, questions, audit, agents] = await Promise.all([
+      sqliteJson(`SELECT generation, text, createdAt FROM generations WHERE requestId='${id}' ORDER BY generation`),
+      sqliteJson(`SELECT id, generation, state, sessionId, attemptedAt, submittedAt, acceptedAt FROM deliveries WHERE requestId='${id}' ORDER BY generation`),
+      sqliteJson(`SELECT generation, outcome, summary, validation, checks, risks, evidence, sessionId, createdAt FROM results WHERE requestId='${id}' ORDER BY generation`),
+      sqliteJson(`SELECT id, generation, text, state, replyText, repliedAt FROM questions WHERE requestId='${id}' ORDER BY generation, createdAt`),
+      sqliteJson(`SELECT transition, sessionId, createdAt FROM audit_events WHERE entityId='${id}' ORDER BY id`),
+      mailboxLabels(),
+    ]);
+    for (const step of audit) step.actor = mailboxLabelOf(agents, step.sessionId);
+    return { result: { request: mailboxEntry(agents, request), generations, deliveries, results, questions, audit } };
+  }
+  const ops = await sqliteJson(`SELECT id, state, payload, result FROM operations WHERE kind='remote.request'
+    AND (json_extract(result,'$.history.request.id')='${id}' OR id='${id}')`);
+  const op = ops[0];
+  if (!op) return { result: { error: `Unknown request ${id}` } };
+  const payload = JSON.parse(op.payload);
+  const history = op.result ? (JSON.parse(op.result).history ?? null) : null;
+  return { result: { remote: { peerId: payload.peerId, operationState: op.state, operationId: op.id }, history } };
+}
+
 // ——— herdr peers ————————————————————————————————————————————————————————————
 // The plugin's refresh loop writes a name + counts snapshot of its configured
 // SSH peers next to the pane metadata files (never tokens). The GUI mod reads
@@ -502,6 +606,10 @@ try {
         break;
       case 'review':
         return out(await review(Number(positional[0]) || Number(flags.limit) || 20));
+      case 'mailbox':
+        return out(await mailboxListing(positional[0]));
+      case 'request':
+        return out(await requestDetail(positional[0]));
       case 'peers':
         return out(await peers());
       case 'session':
@@ -521,7 +629,7 @@ try {
         break;
       }
       default:
-        fail(`herdr shim: unsupported command "${command ?? '(missing)'}". Supported: agent list, peers, review, session orphans, pane split|get|list|close|run|report-metadata|of-terminal`);
+        fail(`herdr shim: unsupported command "${command ?? '(missing)'}". Supported: agent list, peers, review, mailbox, request, session orphans, pane split|get|list|close|run|report-metadata|of-terminal`);
     }
   })();
 } catch (error) {
