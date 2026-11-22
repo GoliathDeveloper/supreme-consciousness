@@ -78,8 +78,11 @@ function Sidebar(props) {
 export default Plugin.define({
     id: "supreme-consciousness.shortcuts",
     setup: async (context) => {
-        if (process.env.HERDR_ENV !== "1")
-            return;
+        // No HERDR_ENV gate: the sidebar degrades gracefully outside Herdr (the
+        // shortcuts section warns when config.toml is unreadable, the coordination
+        // section reports store-unavailable) — a silent return was the worst
+        // failure mode, invisible on the Mini's install for hours. The env remains
+        // required only where it fails loudly: open_agent provisioning.
         const options = context.options;
         if (options.configPath !== undefined && (typeof options.configPath !== "string" || !options.configPath)) {
             throw new Error("supreme-consciousness: configPath must be a non-empty string");

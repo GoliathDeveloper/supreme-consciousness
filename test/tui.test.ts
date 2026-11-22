@@ -69,14 +69,16 @@ test("sidebar renders real OpenTUI content, wraps narrow rows, and collapses", a
   }
 });
 
-test("no sidebar registration outside Herdr", async () => {
+test("sidebar registers without HERDR_ENV — graceful fallbacks, no silent gate", async () => {
+  // Regression guard: the setup must never silently return when HERDR_ENV is
+  // unset — the Mini's install lost its whole sidebar to exactly that.
   const old = process.env.HERDR_ENV;
   delete process.env.HERDR_ENV;
   try {
     const { default: plugin } = await import("../dist/tui.jsx");
     let registered = false;
     await plugin.setup({ options: {}, theme: {}, ui: { slot: () => { registered = true; }, dialog: {} } } as never);
-    expect(registered).toBe(false);
+    expect(registered).toBe(true);
   } finally {
     if (old !== undefined) process.env.HERDR_ENV = old;
   }

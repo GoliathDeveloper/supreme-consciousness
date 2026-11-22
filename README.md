@@ -218,7 +218,9 @@ npm run build        # emits dist/ (server: dist/index.js)
 #    Show the panel: clone a layout, add a block with {"mod": "supreme-consciousness"},
 #    then layout.switch — or toggle it as an overlay with mod.open.
 
-# 4. Environment (~/.zshrc) — Herdr sets HC_TERMINAL_ID/HC_TERMINAL_SOCKET per terminal
+# 4. Environment (~/.zshrc) — optional, only for open_agent provisioning
+#    (HERDR_ENV gates provisioning, which fails loudly without it; the TUI
+#    sidebar and the coordination worker run fine without any of this)
 export HERDR_ENV=1
 export HERDR_SOCKET_PATH="$HOME/.local/state/herdr-core/default/default.sock"
 if [ -n "$HC_TERMINAL_ID" ] && [ -z "$HERDR_PANE_ID" ]; then
