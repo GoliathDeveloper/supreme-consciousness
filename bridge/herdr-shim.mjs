@@ -211,6 +211,10 @@ async function agentList() {
     const { picked } = resolve(term);
     if (picked) sessionPanes.set(picked.id, (sessionPanes.get(picked.id) ?? 0) + 1);
   }
+  // Human-chosen nicknames live in the coordination store, keyed by session;
+  // a missing or locked DB is an empty map, not an error.
+  const nicknames = new Map();
+  try { for (const row of await sqliteJson('SELECT sessionId, nickname FROM agents')) if (row.nickname) nicknames.set(row.sessionId, row.nickname); } catch {}
   const agents = [];
   for (const term of agents_) {
     const { picked, ambiguous } = resolve(term);
@@ -235,6 +239,7 @@ async function agentList() {
       // only this signal and goes blind exactly when coordination is active.
       tui_status: tuiState ?? null,
       name: term.tab.name ?? term.entry.name ?? picked.title ?? picked.id,
+      ...(nicknames.get(picked.id) ? { nickname: nicknames.get(picked.id) } : {}),
       ...(panes > 1 ? { conflict: panes } : {}),
       ...(ambiguous > 1 ? { ambiguous } : {}),
       agent_session: { agent: 'opencode', kind: 'id', value: picked.id },

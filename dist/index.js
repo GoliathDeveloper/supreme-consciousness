@@ -374,12 +374,15 @@ export default Plugin.define({
             }));
             editor.add(tool({
                 name: "set_nickname",
-                description: "Set or change the human-readable nickname of an agent. All subsequent label references (UI, review feed, list_agents) use this nickname instead of the default pane name.",
-                input: { type: "object", properties: { agentId: text, name: text }, required: ["agentId", "name"], additionalProperties: false },
+                description: "Set or change the human-readable nickname of an agent. All subsequent label references (UI, review feed, list_agents) use this nickname instead of the default pane name. Identify the agent by sessionId or agentId — either works.",
+                input: { type: "object", properties: { agentId: text, sessionId: text, name: text }, required: ["name"], additionalProperties: false },
                 async execute(input, context) {
                     await caller(context.sessionID);
-                    store.updateAgentNickname(input.agentId, input.name);
-                    return { content: json({ ok: true, agentId: input.agentId, nickname: input.name }) };
+                    const idOrSession = input.sessionId ?? input.agentId;
+                    if (!idOrSession)
+                        throw new Error("set_nickname needs sessionId or agentId");
+                    store.updateAgentNickname(idOrSession, input.name);
+                    return { content: json({ ok: true, agent: idOrSession, nickname: input.name }) };
                 },
             }));
             editor.add(tool({

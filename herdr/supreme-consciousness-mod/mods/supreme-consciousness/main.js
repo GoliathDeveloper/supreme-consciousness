@@ -9,7 +9,7 @@
 // plugin's SQLite store stays the source of truth.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { theme, exec, readTextFile, run, home, setBadge, checking } from "herdr";
 
 const METADATA = () => `${home()}/.local/state/supreme-consciousness/metadata`;
@@ -39,6 +39,7 @@ const clip = (text, n) => {
   return s.length > n ? `${s.slice(0, Math.max(0, n - 1))}…` : s;
 };
 const short = (label) => String(label ?? "").replace(/^OC \| /, "");
+const scriptPath = (root, name) => `${root ?? `${home()}/Projects/Herdr-A2A`}/scripts/${name}`;
 const clock = (ms, seconds) => {
   const d = new Date(Number(ms));
   if (isNaN(d)) return "";
@@ -58,6 +59,8 @@ export default class CoordinationPanel extends View {
     this.error = null;
     this.helloStatus = null;
     this.pluginRoot = null;
+    this.rename = null; // { sessionId, state, message } — one agent at a time
+    this.renameInput = null;
     cx.spawn(async (cx) => {
       while (true) {
         await this.refresh();
@@ -172,6 +175,85 @@ export default class CoordinationPanel extends View {
     return this.chip(label, value);
   }
 
+  // ——— Rename: the human names their agents ———
+  //
+  // The ✎ affordance opens an inline input; saving shells out to the plugin's
+  // scripts/set-nickname.mjs (the mod never touches the store itself, same
+  // rule as the hello buttons). Nicknames are per machine's coordination DB,
+  // keyed by the agent's session id. Click handlers pass their cx so state
+  // changes repaint immediately, exactly like the win98 dialog buttons.
+
+  startRename(agent, cx) {
+    const sessionId = agent.agent_session?.value;
+    if (!sessionId) return;
+    this.rename = { sessionId, state: "editing", message: null };
+    this.renameInput = InputState.new({ placeholder: "nickname" });
+    this.renameInput.set_value(String(agent.nickname ?? short(agent.name ?? "")));
+    this.renameInput.on("change", (_e, notifyCx) => {
+      if (this.rename) this.rename = { ...this.rename, message: null };
+      notifyCx.notify();
+    });
+    cx?.notify();
+  }
+
+  cancelRename(cx) {
+    this.rename = null;
+    this.renameInput = null;
+    cx?.notify();
+  }
+
+  saveRename(cx) {
+    const target = this.rename?.sessionId;
+    const name = String(this.renameInput?.value() ?? "").trim();
+    if (!target) return;
+    if (!name) {
+      this.rename = { sessionId: target, state: "editing", message: "type a name first" };
+      cx?.notify();
+      return;
+    }
+    this.rename = { sessionId: target, state: "saving", message: null };
+    cx?.notify();
+    exec("node", [scriptPath(this.pluginRoot, "set-nickname.mjs"), target, name]).then((res) => {
+      if (res.code === 0) {
+        this.refresh().then(() => { this.cancelRename(cx); }).catch(() => this.cancelRename(cx));
+      } else {
+        const reason = (res.stderr || "").split("\n").find((l) => l.startsWith("Refusing")) ?? (res.stderr || "").split("\n").find(Boolean) ?? `exit ${res.code}`;
+        this.rename = { sessionId: target, state: "editing", message: clip(reason, 100) };
+        cx?.notify();
+      }
+    }).catch((error) => {
+      this.rename = { sessionId: target, state: "editing", message: clip(`rename failed: ${String(error).slice(0, 110)}`, 130) };
+      cx?.notify();
+    });
+  }
+
+  renameEditor(agent) {
+    const t = theme();
+    if (!this.rename) return null;
+    const busy = this.rename.state === "saving";
+    const editing = this.rename.state === "editing" || busy;
+    if (!editing) return null;
+    const tooLong = String(this.renameInput?.value() ?? "").length > 80;
+    const field = div().flex_1().child(Input.new(this.renameInput)
+      .id(`rename-${agent.pane_id?.slice(0, 8)}`).h(24).px(7).bg(t.canvas)
+      .border(1).border_color(t.border).rounded(5).text_size(11.5).text_color(t.foreground));
+    const save = div().id("rename-save").px(8).py(3).rounded(5).bg(t.canvas)
+      .text_color(busy ? t.dim : t.done)
+      .on_click((_e, cx) => { if (!busy) this.saveRename(cx); })
+      .child(busy ? "saving…" : "save");
+    const cancel = div().id("rename-cancel").px(8).py(3).rounded(5).bg(t.canvas)
+      .text_color(t.dim)
+      .on_click((_e, cx) => this.cancelRename(cx))
+      .child("cancel");
+    const row = h_flex().gap(6).items_center().child(field).child(save).child(cancel);
+    const tooLongLine = div().text_color(t.blocked).child("name too long — max 80 characters");
+    const message = this.rename.message ? div().text_color(t.blocked).child(clip(this.rename.message, 110)) : null;
+    return v_flex().gap(4).pt(2)
+      .child(row)
+      .when(tooLong, (el) => el.child(tooLongLine))
+      .when(Boolean(message), (el) => el.child(message));
+  }
+
   agentRow(agent, pending) {
     const t = theme();
     const pane = agent.pane_id;
@@ -199,11 +281,15 @@ export default class CoordinationPanel extends View {
       .on_click(() => run("agent.focus", { terminal: agent.terminal_id }))
       .child(h_flex().gap(6).items_center()
         .child(div().size(7).rounded(4).flex_none().bg(active ? t.working : t.idle))
-        .child(div().flex_1().text_color(t.foreground).child(short(agent.name || agent.cwd || pane)))
+        .child(div().flex_1().text_color(t.foreground).child(short(agent.nickname || agent.name || agent.cwd || pane)))
+        .child(div().id(`rename-open-${pane?.slice(0, 8)}`).px(5).rounded(4).text_color(t.muted)
+          .on_click((_e, cx) => { cx.stop_propagation(); this.startRename(agent, cx); })
+          .child("✎"))
         .child(div().text_color(active ? t.working : t.dim).child(statusText)))
       .when(Boolean(conflictLine), el => el.child(conflictLine))
       .when(Boolean(ambiguousLine), el => el.child(ambiguousLine))
       .when(Boolean(workLine), el => el.child(workLine))
+      .when(Boolean(this.rename && this.rename.sessionId === (agent.sessionId ?? agent.agent_session?.value)), (el) => el.child(this.renameEditor(agent)))
       .child(h_flex().gap(12)
         .child(this.tokenRow("in", this.token(pane, "herdr_inbox")))
         .child(this.tokenRow("out", this.token(pane, "herdr_outbox")))

@@ -326,13 +326,16 @@ export class Store {
         this.run('UPDATE requests SET revision=revision+1,updatedAt=MAX(updatedAt+1,?) WHERE id=?', Date.now(), id);
     }
     observeAgent(input) { return this.saveAgent(input); }
-    updateAgentNickname(agentId, nickname) {
-        text(agentId, 'agent ID');
+    updateAgentNickname(idOrSession, nickname) {
+        text(idOrSession, 'agent ID');
         text(nickname, 'nickname');
         this.atomic(() => {
-            this.readAgent(this.one('SELECT * FROM agents WHERE id=?', agentId));
-            this.run('UPDATE agents SET nickname=? WHERE id=?', nickname, agentId);
-            this.audit(agentId, `nickname:${nickname}`, this.machineId);
+            // A human (or the mod) may only know the session id; resolve either form.
+            const found = this.db.query('SELECT * FROM agents WHERE id=?').get(idOrSession)
+                ?? this.db.query('SELECT * FROM agents WHERE sessionId=?').get(idOrSession);
+            const agent = this.readAgent(row(found));
+            this.run('UPDATE agents SET nickname=? WHERE id=?', nickname, agent.id);
+            this.audit(agent.id, `nickname:${nickname}`, this.machineId);
         });
     }
     saveAgent(input, provision = false) {

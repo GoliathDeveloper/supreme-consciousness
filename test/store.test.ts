@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -84,6 +85,45 @@ describe('identity and persistence', () => {
     expect(replacement.id).not.toBe(agent.id)
     expect(store.agents()).toHaveLength(2)
     expect(store.agent(agent.id).management).toBe('independent')
+  })
+
+  test('nicknames: sessionId resolution, label overlay, re-observation preserves them', () => {
+    const { store, agent } = fixture()
+    // Set by sessionId (the human-friendly form) — readAgent overlays the label.
+    store.updateAgentNickname(agent.sessionId, 'phil-s-coordinator')
+    const renamed = store.agent(agent.id)
+    expect(renamed.nickname).toBe('phil-s-coordinator')
+    expect(renamed.label).toBe('phil-s-coordinator')
+    // Re-observation (every inventory poll) must not wipe the nickname.
+    const reobserved = observe(store, { label: 'Pane Title', state: 'working' })
+    expect(reobserved.nickname).toBe('phil-s-coordinator')
+    expect(reobserved.label).toBe('phil-s-coordinator')
+    // The pane title still updates underneath; the nickname keeps winning.
+    // agentId form works too, and unknown ids are refused.
+    store.updateAgentNickname(agent.id, 'short-name')
+    expect(store.agent(agent.id).label).toBe('short-name')
+    expect(() => store.updateAgentNickname('ses_unknown', 'nope')).toThrow('Missing or corrupt')
+    // A nickname can be cleared only by setting a new one; empty is refused.
+    expect(() => store.updateAgentNickname(agent.id, '')).toThrow()
+  })
+
+  test('migrated v2 DB (nickname appended by ALTER TABLE) accepts inserts and nicknames', () => {
+    const { store, agent, path } = fixture()
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+    // Simulate the pre-nickname v2 layout: drop the column (allowed — it is
+    // not part of any constraint), leaving it appended by the migration below.
+    execFileSync('sqlite3', [path, 'ALTER TABLE agents DROP COLUMN nickname;'])
+    const reopened = open(path)
+    // Migration appended nickname last; the positional order differs from the
+    // schema — the explicit-column INSERT must bind every column correctly.
+    const fresh = observe(reopened, { sessionId: 'post-migration', paneId: 'pane-2', terminalId: 'terminal-2' })
+    expect(fresh.label).toBe('Worker')
+    expect(fresh.state).toBe('idle')
+    expect(fresh.management).toBe('independent')
+    reopened.updateAgentNickname(fresh.sessionId, 'after-migration')
+    expect(reopened.agent(fresh.id).label).toBe('after-migration')
+    expect(reopened.agent(agent.id).label).toBe('Worker')
   })
 
   test('management observations persist without inferring ownership from requests', () => {
