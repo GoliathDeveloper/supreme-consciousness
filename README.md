@@ -192,6 +192,8 @@ translates to the installed desktop generation:
 | `herdr agent list` | `herdr-app ls` + `hc get` (panes, cwd) + OpenCode `/api/session` + `/api/session/active` (session identity + running state) |
 | `herdr peers` | Reads the Remote peers snapshot the plugin publishes to `metadata/peers.json` (name + counts, never tokens) for the mod's Remote peers section |
 | `herdr review <limit>` | Read-only projection of the coordination store for human review |
+| `herdr mailbox <session>` | Read-only mailbox for one agent session — the exact items the in/out chips count (work orders both ways, delivered receipts, handbacks, remote placeholders) |
+| `herdr request <id>` | Read-only detail for one request — the full local history, or a remote request's cached SSH receipt |
 | `herdr pane split/get/list/close/run` | `herdr-app do pane.*` / `terminal.open` / `hc send` |
 | `herdr pane report-metadata` | Writes sidebar tokens to `~/.local/state/supreme-consciousness/metadata/<pane>.json` for the mod |
 | `herdr pane of-terminal <t>` | Helper used by `~/.zshrc` to resolve `HERDR_PANE_ID` from `HC_TERMINAL_ID` |
@@ -212,10 +214,14 @@ A gpui-kit panel that renders, every 2 seconds:
 
 Plus the **Hello test** (▶ starts an agent-to-agent relay cascade, ✕ cancels
 in-flight legs, live leg watch with verdicts), the **Now** transition feed,
-the **History** review of every request, and a `⇄ N` window badge while
-coordination work is owed.
+and a `⇄ N` window badge while coordination work is owed. The in/out chips
+are the mailbox interface: clicking one opens that agent's mailbox inline —
+the same items the chip counts — and clicking an item opens its detail card
+(local store history, or a remote request's cached receipt).
 
-Clicking an agent row focuses its pane (`agent.focus`). It never mutates coordination
+Clicking an agent row focuses its pane (`agent.focus`); clicking an in/out
+chip opens that agent's mailbox inline and an item opens its detail card —
+read-only store reads via the shim. It never mutates coordination
 state. Token semantics: only accepted **tasks** count toward `wait`; instructions
 release their queue slot on acceptance.
 
@@ -289,7 +295,7 @@ idempotency key) makes that key a **checkable promise**: `hand_back` verifies
 the promised request exists and publishes the result with
 `validation: "rejected"` plus a risk naming the missing key when it doesn't.
 Agents cannot self-approve — `rejected` is the only caller-supplied validation
-value. History renders it as "Validation rejected", and the relay verdict
+value. The mailbox detail renders it as "Validation rejected", and the relay verdict
 separates **round completion** from **protocol quality** ("all 4 legs
 traversed · guard caught 1 deviation (leg 1)").
 

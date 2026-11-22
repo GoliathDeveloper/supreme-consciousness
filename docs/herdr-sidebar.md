@@ -11,8 +11,12 @@ and unchanged reports refresh after 10 seconds.
 | `$herdr_outbox` | Highest-priority outbox state and total retained request count |
 | `$herdr_wait` | Count of outgoing accepted tasks awaiting handback |
 
-Counts include retained history. `blocked` includes unknown delivery, paused work,
-failed tasks and completions needing review. Tokens contain no task briefs or secrets.
+Counts include retained history. They are lifetime **mailbox** counts: work
+orders in both directions, delivered notices (receipts, results) as the origin
+session's inbound mail, and handbacks as the recipient's outbound mail — the
+same items the mod's clickable in/out chips open. `blocked` includes unknown
+delivery, paused work, failed tasks and completions needing review. Tokens
+contain no task briefs or secrets.
 
 Add these cells as rows to your existing `[ui.sidebar.agents].rows` in Herdr's
 `config.toml`. Preserve existing rows and other plugins' tokens. This example is

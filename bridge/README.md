@@ -20,10 +20,19 @@ desktop generation (`herdr-app` / `herdr-core`) plus OpenCode's HTTP API:
 - `review [limit]` — **human-review projection of the coordination store**
   (read-only `sqlite3`): who asked whom, the briefs, outcomes, lifecycle
   transitions, and processed counts
+- `mailbox <sessionId>` — **the mailbox one agent session sees** (read-only
+  `sqlite3`): the exact items the in/out chips count — work orders both ways,
+  delivered receipts as inbound mail, handbacks as outbound mail, remote
+  operations as outbound placeholders
+- `request <id>` — **one mailbox item in full** (read-only `sqlite3`):
+  generations, deliveries, results, questions and audit trail; for a remote
+  request, its latest cached SSH receipt instead of a local row
 
 ## Mod (`~/.config/herdr-app/mods/supreme-consciousness/`)
 
 Presentation layer only: agent list with status dots, the
-`$herdr_inbox/outbox/wait` tokens, a **processed** count, and the reviewer's
-**History** view (briefs, results, audit trails) — all read-only, refreshed
-every 2 s. Clicks focus panes; nothing here mutates coordination state.
+`$herdr_inbox/outbox/wait` tokens, a **processed** count, and clickable
+in/out chips that open the agent's **mailbox** inline (items and detail
+cards via `herdr mailbox` / `herdr request`) — all read-only, refreshed
+every 2 s. Clicks focus panes or read the store; nothing here mutates
+coordination state.

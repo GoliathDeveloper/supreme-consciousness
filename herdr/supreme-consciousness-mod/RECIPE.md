@@ -23,11 +23,16 @@ theme and other panels stay as they are.
   - **Hello test**: a **▶ say hello** button that starts an agent-to-agent
     greeting cascade, a **✕ cancel** button, and a live leg watch — every leg
     with its state, the handback summaries, and a verdict line.
+  - **Mailbox**: the in/out chips are clickable. Clicking one opens that
+    agent's mailbox inline — the exact items the chip counts (work orders,
+    delivered receipts, handbacks, remote placeholders; newest first, with a
+    `show all` beyond ten). Clicking an item opens its detail card via
+    `herdr request`: brief, origin → recipient, state, result summary and the
+    transition trail — or a remote request's cached SSH receipt. The same
+    request may legitimately appear twice (order + handback are two pieces of
+    mail), so item element ids are unique per row, not per request.
   - **Now**: the live transition feed (`enqueue → attempt → submitted →
-    accept → finish`), newest first.
-  - **History**: the human-review record of every request — origin, recipient,
-    brief, state, handback summary, and the full transition trail. Click any
-    row or agent to focus its pane.
+    accept → finish`), newest first. Click any agent row to focus its pane.
 - Window badge `⇄ N` while coordination work is owed.
 
 ## How it behaves
@@ -99,6 +104,7 @@ On the machine whose agents should join the mesh:
    ```sh
    herdr agent list | python3 -c "import json,sys; print('agents:', len(json.load(sys.stdin)['result']['agents']))"
    herdr review 1
+   herdr mailbox <sessionId>   # the items behind a pane's in/out chips
    ls ~/.local/state/supreme-consciousness/metadata   # files appear within ~2s per agent
    ```
 
