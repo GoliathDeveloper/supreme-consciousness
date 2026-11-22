@@ -82,16 +82,20 @@ On the machine whose agents should join the mesh:
 2. Register the plugin in `~/.config/opencode/opencode.jsonc`:
    `"plugins": [ { "package": "<the absolute path above>" } ]`
    The plugin hot-loads — restart the OpenCode service only if the tools do not appear.
-3. Install the inventory shim:
+4. Install the inventory shim:
    `cp bridge/herdr-shim.mjs "$HOME/.local/bin/herdr" && chmod +x "$HOME/.local/bin/herdr"`
-4. Verify (each should pass):
+5. **For the in-TUI sidebar** (the Coordination section beside "Herdr shortcuts"),
+   export `HERDR_ENV=1` in the shell profile — the TUI plugin deliberately stays
+   silent without it. For `open_agent` provisioning also export
+   `HERDR_SOCKET_PATH="$HOME/.local/state/herdr-core/default/default.sock"` and
+   compute `HERDR_PANE_ID` from `HC_TERMINAL_ID` at shell start (the plugin
+   README has the snippet). Open a **new tab** after editing the profile.
+6. Verify (each should pass):
    ```sh
    herdr agent list | python3 -c "import json,sys; print('agents:', len(json.load(sys.stdin)['result']['agents']))"
    herdr review 1
    ls ~/.local/state/supreme-consciousness/metadata   # files appear within ~2s per agent
    ```
-   `open_agent` provisioning additionally wants `HERDR_ENV=1` and `HERDR_PANE_ID` exported
-   in the shell profile (see the plugin README); basic coordination works without them.
 
 The plugin's own README covers agent-to-agent requests, the integrity guard,
 cross-machine peers (SSH + token pairing) and the request lifecycle.
