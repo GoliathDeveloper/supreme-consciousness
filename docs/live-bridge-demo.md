@@ -66,7 +66,7 @@ agent; the store and the two workers relayed typed prompts.
   on the calling session's directory and the shim's Herdr-reported session↔pane
   mapping (the service environment cannot carry a per-pane `HERDR_PANE_ID`).
 - Models: both agents were moved off a rate-limited free-tier model for the demo
-  and restored to the local free model (`llama-local/lfm3-opencode`) afterwards.
+  and restored to the local free model (`llama-local/lfm3-opencode-128k`) afterwards.
   The delivery worker reads each session's current model at dispatch time.
 
 ## Reproducing

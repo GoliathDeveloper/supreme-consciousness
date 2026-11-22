@@ -246,25 +246,38 @@ a fresh session on an under-declared default is starved before its first
 turn (the "did /new and then nothing" signature).
 
 **Free OpenRouter models 429.** Daily free-tier limit — use local models
-(`llama-local/lfm3-opencode`) or a paid model for the test window.
+(`llama-local/lfm3-opencode-128k`) or a paid model for the test window.
 
 **Local model says "Context size has been exceeded".** OpenCode's system prompt
 plus the coordination plugins' tool schemas is ~8k tokens **before any
 conversation**, so an 8192-token context window can never fit — not even a
-fresh session. Two knobs must agree:
+fresh session. The tier ladder must tell the truth on both sides, and every
+tier an agent actually uses must declare **≥ ~10k** (the 8K entry is a
+documented trap, not a usable tier):
+
+| Tier entry (opencode.jsonc) | Declares | Server (`models.user.ini` ctx-size) |
+| --- | --- | --- |
+| `lfm3-opencode-8k` | 8192 | 8192 — **trap: below the ~8k overhead, sessions starve** |
+| `lfm3-opencode-32k` | 32768 | 32768 |
+| `lfm3-opencode-64k` | 65536 | 65536 |
+| `lfm3-opencode-128k` | 131072 | 131072 — the working tier (model trained for 262k; extra window is cheap) |
 
 ```sh
 # server side — Llama.app's user override file takes over from its ctx picker
 # (~/.config/llama/models.user.ini, [LiquidAI/LFM3-1.7B-GGUF:Q8_0] section):
-#   ctx-size = 32768        # model is trained for 262k; extra window is cheap
+#   ctx-size = 131072       # model is trained for 262k; extra window is cheap
 # then restart the Llama app (not opencode) and verify:
 curl -s http://127.0.0.1:9931/v1/models | python3 -c \
   "import json,sys; print(json.load(sys.stdin)['data'][0]['meta']['n_ctx'])"
 
 # opencode side — ~/.config/opencode/opencode.jsonc must declare the same
-# window ("limit": { "context": 32768, ... } on the lfm3-opencode-8k entry);
+# window ("limit": { "context": 131072, ... } on the matching tier entry);
 # the running service hot-reloads this — verify with `opencode api get /api/model`
 ```
+
+The same rule applies to any local provider: the *served* context (what the
+server reports) and the *declared* context (what OpenCode accounts against)
+must agree, and both must clear the ~10k floor.
 
 
 **Nothing is delivered.** Check `herdr agent list` shows the target pane with
