@@ -213,7 +213,7 @@ export class DeliveryWorker {
     let pinned: Agent;
     try { pinned = this.store.agent(agent.id); } catch { return; }
     if (IDENTITY_KEYS.some(key => agent[key as keyof Agent] !== pinned[key as keyof Agent])) return;
-    try { const local = this.store.list(agent.sessionId); await this.publish(agent.paneId, agent.sessionId, { ...local, outbox: [...local.outbox, ...remoteOutbox(this.store, agent.sessionId)] }); }
+    try { const local = this.store.mailbox(agent.sessionId); await this.publish(agent.paneId, agent.sessionId, { ...local, outbox: [...local.outbox, ...remoteOutbox(this.store, agent.sessionId)] }); }
     catch { this.report(); }
     const request = this.store.pending(agent.id);
     if (request) {

@@ -577,6 +577,24 @@ export class Store {
     }))
   }
 
+  // Mailbox view for the sidebar chips: list() counts only formal work orders,
+  // but the correspondence travels too — a handback is the agent's reply (its
+  // outbound mail for that request), and a delivered notice (receipt, result
+  // announcement, remote result) is the origin session's inbound mail. Lifetime
+  // counts, like a real mailbox. Synthetic entries reuse the subject request's
+  // identity so the panel's detail view opens the same request.
+  mailbox(sessionId: string): { inbox: Request[]; outbox: Request[] } {
+    text(sessionId, 'session ID')
+    const { inbox, outbox } = this.list(sessionId)
+    const receipts = this.all(`${projection} WHERE r.id IN
+      (SELECT entityId FROM notifications WHERE sessionId=? AND state='delivered') ORDER BY d.sequence`, sessionId)
+      .map(r => this.readRequest(r))
+    const handbacks = this.all(`${projection} WHERE EXISTS (SELECT 1 FROM results t2
+      WHERE t2.requestId=r.id AND t2.generation=r.generation AND t2.sessionId=?) ORDER BY d.sequence`, sessionId)
+      .map(r => this.readRequest(r))
+    return { inbox: [...inbox, ...receipts], outbox: [...outbox, ...handbacks] }
+  }
+
   pending(recipientId: string): Request | undefined {
     const r = this.db.query(`${projection} WHERE r.recipientId=? AND r.cancelledAt IS NULL AND t.requestId IS NULL
       AND (d.state IN ('queued','unknown','submitted') OR (d.state='accepted' AND r.kind='task'))
@@ -851,7 +869,7 @@ export class Store {
       requestId: text(r.requestId, 'request ID'), generation: number(r.generation, 'generation'), sessionId: text(r.sessionId, 'session ID'),
       outcome: choice(r.outcome, ['completed', 'paused', 'failed'], 'outcome'), summary: text(r.summary, 'summary'),
       checks: strings(JSON.parse(text(r.checks, 'checks')), 'checks'), risks: strings(JSON.parse(text(r.risks, 'risks')), 'risks'),
-      evidence: strings(JSON.parse(text(r.evidence, 'evidence')), 'evidence'), validation: choice(r.validation, ['pending', 'not_required'], 'validation'),
+      evidence: strings(JSON.parse(text(r.evidence, 'evidence')), 'evidence'), validation: choice(r.validation, ['pending', 'not_required', 'rejected'], 'validation'),
       createdAt: number(r.createdAt, 'createdAt'),
     }
   }

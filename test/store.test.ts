@@ -160,6 +160,45 @@ describe('identity and persistence', () => {
     expect(store.claimAgent('missing-agent', 'worker-a', now, ttl)).toBe(false)
   })
 
+  test('mailbox: handbacks are sent mail, receipts are received mail, lifetime', () => {
+    const { store, agent } = fixture()
+    // Two work orders delivered to the agent; the first is done (accepted +
+    // handed back), the second is accepted and still in flight.
+    const first = enqueue(store, agent)
+    accept(store, first)
+    store.finish(first.id, 1, agent.sessionId, completed)
+    const second = enqueue(store, agent, { idempotencyKey: 'mailbox-2' })
+    accept(store, second)
+    let box = store.mailbox(agent.sessionId)
+    expect(box.inbox.map(r => r.id)).toEqual(expect.arrayContaining([first.id, second.id]))
+    expect(box.outbox.map(r => r.id)).toEqual([first.id])
+    // The origin session received the completion receipt as inbound mail —
+    // finish() schedules it, and it only counts once delivered.
+    const notice = store.notices('origin')[0]
+    expect(store.mailbox('origin').inbox).toHaveLength(0)
+    const messageId = crypto.randomUUID()
+    expect(store.noticeAttempt(notice.id, messageId)).toBe(true)
+    store.noticeDelivered(notice.id, messageId)
+    box = store.mailbox('origin')
+    expect(box.inbox.map(r => r.id)).toEqual([first.id])
+    // list() is unchanged: formal work orders only, no receipts or handbacks.
+    expect(store.list(agent.sessionId).outbox).toHaveLength(0)
+    expect(store.list('origin').inbox).toHaveLength(0)
+  })
+
+  test('a rejected-validation result stays readable (TUI request details)', () => {
+    const { store, agent } = fixture()
+    const request = enqueue(store, agent)
+    accept(store, request)
+    // Relay integrity marks a handback rejected when its promised relay never
+    // fired. The write path allows it; the read path must too, or history()
+    // throws and the panel shows "Request details unavailable".
+    store.finish(request.id, 1, agent.sessionId, { ...completed, validation: 'rejected' })
+    const history = store.history(request.id, agent.sessionId)
+    expect(history.results[0].validation).toBe('rejected')
+    expect(history.request.summary).toBe('Checked the task')
+  })
+
   test('management observations persist without inferring ownership from requests', () => {
     const { store, agent } = fixture()
     expect(() => observe(store, { management: 'managed', managerSessionId: 'manager' })).toThrow('cannot change')

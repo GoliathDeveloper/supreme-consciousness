@@ -254,7 +254,7 @@ export class DeliveryWorker {
         if (IDENTITY_KEYS.some(key => agent[key] !== pinned[key]))
             return;
         try {
-            const local = this.store.list(agent.sessionId);
+            const local = this.store.mailbox(agent.sessionId);
             await this.publish(agent.paneId, agent.sessionId, { ...local, outbox: [...local.outbox, ...remoteOutbox(this.store, agent.sessionId)] });
         }
         catch {
