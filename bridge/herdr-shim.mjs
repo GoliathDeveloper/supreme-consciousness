@@ -125,14 +125,22 @@ async function agentList() {
     list.push(session);
     byDirectory.set(session.directory, list);
   }
+  // Same conversation attached in more than one pane: the store refuses to
+  // serve a session from two panes, so surface the conflict to the human.
+  const sessionPanes = new Map();
+  for (const term of terms) {
+    const candidates = term.directory ? (byDirectory.get(term.directory) ?? []) : [];
+    const running = candidates.filter(s => active[s.id]?.type === 'running');
+    const picked = (running.length ? running : candidates).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    if (picked) sessionPanes.set(picked.id, (sessionPanes.get(picked.id) ?? 0) + 1);
+  }
   const agents = [];
   for (const term of terms) {
     const candidates = term.directory ? (byDirectory.get(term.directory) ?? []) : [];
     if (!candidates.length) continue;
-    // One session per pane, as the TUI generation's integration reported: the
-    // running session if there is one, otherwise the most recently updated.
     const running = candidates.filter(s => active[s.id]?.type === 'running');
     const picked = (running.length ? running : candidates).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    const panes = sessionPanes.get(picked.id) ?? 1;
     agents.push({
       pane_id: term.paneId,
       terminal_id: term.terminalId,
@@ -141,6 +149,7 @@ async function agentList() {
       agent: 'opencode',
       agent_status: active[picked.id]?.type === 'running' ? 'working' : 'idle',
       name: term.tab.name ?? term.entry.name ?? picked.title ?? picked.id,
+      ...(panes > 1 ? { conflict: panes } : {}),
       agent_session: { agent: 'opencode', kind: 'id', value: picked.id },
     });
   }

@@ -161,8 +161,12 @@ export default class CoordinationPanel extends View {
     const busy = agent.agent_status === "working";
     const work = pending[agent.sessionId ?? agent.agent_session?.value];
     const active = busy || Boolean(work);
+    const conflict = Number(agent.conflict ?? 0) > 1;
     const workLine = work
       ? div().text_color(t.working).child(clip(`↳ ${work.state === "accepted" ? "owed handback" : work.state}: ${work.brief}`, 120))
+      : null;
+    const conflictLine = conflict
+      ? div().text_color(t.blocked).child(`⚠ this conversation is open in ${agent.conflict} panes — close the duplicate; coordination pauses until then`)
       : null;
     return v_flex().id(`agent-${pane}`).gap(4).p(8).rounded(6).bg(t.canvas)
       .on_click(() => run("agent.focus", { terminal: agent.terminal_id }))
@@ -170,6 +174,7 @@ export default class CoordinationPanel extends View {
         .child(div().size(7).rounded(4).flex_none().bg(active ? t.working : t.idle))
         .child(div().flex_1().text_color(t.foreground).child(short(agent.name || agent.cwd || pane)))
         .child(div().text_color(active ? t.working : t.dim).child(work && !busy ? "coordination" : agent.agent_status ?? "unknown")))
+      .when(Boolean(conflictLine), el => el.child(conflictLine))
       .when(Boolean(workLine), el => el.child(workLine))
       .child(h_flex().gap(12)
         .child(this.tokenRow("in", this.token(pane, "herdr_inbox")))
