@@ -204,6 +204,18 @@ head (above) and the queued request delivers within seconds. Short request ids
 (8 characters, as shown by `watch-store`) work everywhere — scripts resolve
 them to the full id for you.
 
+**Delivery swallowed by compaction.** If the model entry a session uses
+declares a limit near the plugin overhead (~8k tokens of system prompt and
+tool schemas), OpenCode compacts constantly — and a freshly delivered
+coordination prompt can be compacted away **before any turn runs**. The
+request then sticks at `submitted` forever, no activity appears anywhere
+(no turn ever ran — Herdr's native idle was truthful), while the panel's
+"coordination" badge still shows the store obligation. Seen when an entry
+was declared at 6000. Rules: any `llama-local` tier entry must declare
+**≥ ~10k** or sessions on it cannot host coordination at all (the 8K tier
+is a known trap); and the panel's "coordination" badge means *an obligation
+exists in the store*, not that a turn is running.
+
 **Free OpenRouter models 429.** Daily free-tier limit — use local models
 (`llama-local/lfm3-opencode`) or a paid model for the test window.
 
